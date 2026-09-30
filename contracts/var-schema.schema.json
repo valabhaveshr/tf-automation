@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tf-automation.internal/contracts/var-schema.schema.json",
+  "title": "VarSchema",
+  "description": "Normalized shape of a single Terraform variable, as extracted by WS-B (Schema Parser) from a module's variables.tf. This is the frozen Phase 0 contract WS-B, WS-C, and WS-H all build against independently. A module's full schema is a VarSchema[] (see var-schema.example.json).",
+  "type": "object",
+  "required": ["name", "type", "type_raw", "required", "sensitive", "nullable"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Variable name, exactly as declared in variables.tf (e.g. \"size\")."
+    },
+    "type": {
+      "type": "string",
+      "enum": ["string", "number", "bool", "list", "set", "map", "object", "tuple", "any", "unsupported"],
+      "description": "Coarse type kind, derived from typeexpr.TypeConstraint. \"unsupported\" triggers the raw-JSON-field UI fallback (see ARCHITECTURE.md edge cases)."
+    },
+    "type_raw": {
+      "type": "string",
+      "description": "The original HCL type expression text, for display, e.g. \"list(object({name=string, size=string}))\"."
+    },
+    "element_type": {
+      "description": "For list/set/map: the VarSchema-shaped type of elements. For object: see `object_fields`. Omitted for scalar types.",
+      "$ref": "#"
+    },
+    "object_fields": {
+      "type": "object",
+      "description": "For type=\"object\": field name -> VarSchema (recursive, one level = one nesting level for the Phase 1 form-rendering cap of 2 levels).",
+      "additionalProperties": { "$ref": "#" }
+    },
+    "default": {
+      "description": "The variable's default value, if any, as a native JSON value matching `type`. Absent (not null) when the module declares no default.",
+      "type": ["string", "number", "boolean", "object", "array", "null"]
+    },
+    "has_default": {
+      "type": "boolean",
+      "description": "Explicit flag distinguishing \"no default declared\" from \"default is null\" — do not infer this from `default`'s presence alone."
+    },
+    "required": {
+      "type": "boolean",
+      "description": "true when has_default is false and nullable is false — precomputed for the frontend so it doesn't need to re-derive the rule."
+    },
+    "description": {
+      "type": "string",
+      "description": "The variable's description string from variables.tf, shown as form help text."
+    },
+    "sensitive": {
+      "type": "boolean",
+      "description": "Mirrors variables.tf's sensitive = true. Drives the Phase 1 UI warning at preview time (values are still included in generated tfvars per the locked decision)."
+    },
+    "nullable": {
+      "type": "boolean",
+      "description": "Mirrors variables.tf's nullable attribute (defaults to true in Terraform when unset)."
+    },
+    "validations": {
+      "type": "array",
+      "description": "variable { validation { ... } } blocks, surfaced as UI help text only — server-side type/shape checking is the Phase 1 authoritative check, not re-implementation of these conditions.",
+      "items": {
+        "type": "object",
+        "required": ["condition_raw", "error_message"],
+        "properties": {
+          "condition_raw": { "type": "string", "description": "Original HCL condition expression text." },
+          "error_message": { "type": "string" }
+        }
+      }
+    }
+  }
+}

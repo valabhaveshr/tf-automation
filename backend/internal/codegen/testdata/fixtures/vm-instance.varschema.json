@@ -1,0 +1,79 @@
+{
+  "_comment": "Local copy of contracts/var-schema.example.json for WS-C's self-contained tests (WS-C's scope is backend/internal/codegen/** only). Keep in sync with the frozen contract if it changes.",
+  "module_name": "vm-instance",
+  "version_tag": "vm-instance/v1.2.0",
+  "variables": [
+    {
+      "name": "size",
+      "type": "string",
+      "type_raw": "string",
+      "default": "Standard_B2s",
+      "has_default": true,
+      "required": false,
+      "description": "VM SKU size.",
+      "sensitive": false,
+      "nullable": false,
+      "validations": [
+        {
+          "condition_raw": "contains([\"Standard_B2s\", \"Standard_B4ms\"], var.size)",
+          "error_message": "size must be one of the approved SKUs."
+        }
+      ]
+    },
+    {
+      "name": "image",
+      "type": "string",
+      "type_raw": "string",
+      "has_default": false,
+      "required": true,
+      "description": "OS image reference.",
+      "sensitive": false,
+      "nullable": false,
+      "validations": []
+    },
+    {
+      "name": "admin_password",
+      "type": "string",
+      "type_raw": "string",
+      "has_default": false,
+      "required": true,
+      "description": "Local admin password.",
+      "sensitive": true,
+      "nullable": false,
+      "validations": []
+    },
+    {
+      "name": "name",
+      "type": "string",
+      "type_raw": "string",
+      "has_default": false,
+      "required": true,
+      "description": "Resource name. Naming Convention Engine pre-fills this when metadata.yaml sets naming_resource_type.",
+      "sensitive": false,
+      "nullable": false,
+      "validations": []
+    },
+    {
+      "name": "tags",
+      "type": "map",
+      "type_raw": "map(string)",
+      "element_type": {
+        "name": "value",
+        "type": "string",
+        "type_raw": "string",
+        "has_default": false,
+        "required": false,
+        "sensitive": false,
+        "nullable": false,
+        "validations": []
+      },
+      "default": {},
+      "has_default": true,
+      "required": false,
+      "description": "Arbitrary key/value tags.",
+      "sensitive": false,
+      "nullable": false,
+      "validations": []
+    }
+  ]
+}

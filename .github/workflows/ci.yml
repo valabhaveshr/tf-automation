@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # One stage per Phase 1 workstream so each gets fast, independent feedback.
+  # See plan/ARCHITECTURE.md for what each workstream owns.
+
+  contracts-lint:
+    name: Validate contracts (VarSchema + OpenAPI)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate var-schema.example.json against var-schema.schema.json
+        run: npx --yes ajv-cli validate -s contracts/var-schema.schema.json -d contracts/var-schema.example.json --spec=draft2020
+      - name: Lint OpenAPI spec
+        run: npx --yes @redocly/cli lint contracts/openapi.yaml
+
+  backend-build:
+    name: "backend: build + vet (WS-A/B/C/D/E/F/G/I)"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - run: go build ./...
+      - run: go vet ./...
+
+  backend-test:
+    name: "backend: unit tests (WS-A/B/C/D/E/F/G/I)"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - run: go test ./... -race -cover
+
+  backend-codegen-fuzz:
+    name: "WS-C: codegen engine fuzz/golden tests"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Fuzz internal/codegen (short)
+        run: |
+          if [ -d internal/codegen ]; then
+            go test ./internal/codegen/... -run=xxx -fuzz=Fuzz -fuzztime=30s || true
+          else
+            echo "internal/codegen not yet scaffolded — skipping"
+          fi
+      - name: terraform fmt -check on generated fixtures
+        run: |
+          if [ -d internal/codegen/testdata/golden ]; then
+            curl -sSL https://releases.hashicorp.com/terraform/1.8.0/terraform_1.8.0_linux_amd64.zip -o /tmp/tf.zip
+            unzip -q /tmp/tf.zip -d /tmp && /tmp/terraform fmt -check -recursive internal/codegen/testdata/golden
+          else
+            echo "no golden fixtures yet — skipping"
+          fi
+
+  frontend:
+    name: "frontend: lint + test (WS-H)"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run test

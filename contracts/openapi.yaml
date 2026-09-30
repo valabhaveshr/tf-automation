@@ -1,0 +1,539 @@
+openapi: 3.0.3
+info:
+  title: tf-automation API
+  version: "0.2.0-phase3"
+  description: >
+    Frozen contract for tf-automation's REST API. WS-H (Frontend) builds against a mock
+    server generated from this spec; backend orchestration implements against it directly.
+    See plan/ARCHITECTURE.md for full context. Any change to this file is a coordinated
+    contract bump communicated to all workstreams, not a silent edit.
+    v0.2.0 (Phase 3): added OIDC SSO login/callback, roles on User, and the admin audit
+    log endpoint. Built-in username/password login is retained during the SSO migration
+    window (see Locked Decisions / Phase 3 in ARCHITECTURE.md) but is expected to be
+    retired or restricted to a documented break-glass path once SSO is live.
+
+servers:
+  - url: /api
+
+security:
+  - sessionAuth: []
+
+paths:
+  /auth/login:
+    post:
+      summary: Log in with username/password
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string }
+                password: { type: string }
+      responses:
+        "200":
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: "#/components/schemas/User" }
+        "401": { description: Invalid credentials }
+        "429": { description: Rate-limited after too many failed attempts }
+
+  /auth/logout:
+    post:
+      summary: Log out
+      responses:
+        "204": { description: Logged out }
+
+  /auth/me:
+    get:
+      summary: >
+        Get the current session's user. Required so the frontend can recover identity after
+        a full-page redirect (e.g. the /auth/sso/callback flow) where no in-memory login
+        response is available to read the user from — the frontend calls this on mount.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: "#/components/schemas/User" }
+        "401": { description: No valid session }
+
+  /auth/sso/login:
+    get:
+      summary: Begin OIDC login — redirects to the configured IdP's authorization endpoint (PKCE + state)
+      security: []
+      parameters:
+        - name: redirect_to
+          in: query
+          required: false
+          description: Frontend path to return to after a successful login (validated against an allowlist server-side)
+          schema: { type: string }
+      responses:
+        "302": { description: Redirect to IdP }
+
+  /auth/sso/callback:
+    get:
+      summary: OIDC callback — exchanges the auth code, verifies the ID token, upserts the user, issues a session cookie, redirects to the frontend
+      security: []
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema: { type: string }
+        - name: state
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "302": { description: Redirect to the frontend (redirect_to or a default landing page) with the session cookie set }
+        "401": { description: Invalid state, code exchange failure, or ID token verification failure }
+
+  /admin/audit-log:
+    get:
+      summary: Query the audit log (admin-only)
+      parameters:
+        - name: resource_type
+          in: query
+          schema: { type: string, enum: [record, catalog, naming_template, customer] }
+        - name: resource_id
+          in: query
+          schema: { type: string }
+        - name: actor
+          in: query
+          description: Filter by actor username
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50, maximum: 200 }
+        - name: before
+          in: query
+          description: Cursor — return entries created before this ISO timestamp
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AuditLogEntry" }
+        "403": { description: Caller does not have the admin role }
+
+  /catalog:
+    get:
+      summary: List cataloged modules (latest tagged version of each)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/CatalogEntry" }
+
+  /catalog/{moduleName}/schema:
+    get:
+      summary: Get a module's normalized variable schema
+      parameters:
+        - name: moduleName
+          in: path
+          required: true
+          schema: { type: string }
+        - name: ref
+          in: query
+          required: false
+          description: 'A specific pinned version tag, e.g. "vm-instance/v1.2.0". Omit for the latest tag.'
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModuleSchema" }
+        "404": { description: Module or version not found / not catalog-eligible (e.g. untagged) }
+
+  /catalog/refresh:
+    post:
+      summary: Admin-only manual catalog refresh (not shown to normal users)
+      responses:
+        "202": { description: Refresh triggered }
+        "403": { description: Caller is not an admin (users.is_admin = false) }
+
+  /webhooks/github/modules:
+    post:
+      summary: GitHub webhook receiver for the modules repo (push + tag-create events), HMAC-verified
+      security: []
+      responses:
+        "202": { description: Accepted }
+        "401": { description: Invalid HMAC signature }
+
+  /admin/customers:
+    get:
+      summary: List customers (business_short_code registry)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Customer" }
+        "403": { description: Caller is not an admin }
+    post:
+      summary: Register a customer / set its business_short_code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, business_short_code]
+              properties:
+                name: { type: string }
+                business_short_code:
+                  type: string
+                  maxLength: 5
+                  pattern: "^[a-z0-9]+$"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Customer" }
+        "403": { description: Caller is not an admin }
+        "409": { description: Customer name already exists }
+
+  /admin/naming-templates:
+    get:
+      summary: List naming convention templates
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/NamingTemplate" }
+        "403": { description: Caller is not an admin }
+    post:
+      summary: Create or update a naming convention template for (cloud, resource_type)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NamingTemplate" }
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NamingTemplate" }
+        "400": { description: Template references an unknown token }
+        "403": { description: Caller is not an admin }
+
+  /records:
+    get:
+      summary: List records
+      parameters:
+        - name: customer
+          in: query
+          schema: { type: string }
+        - name: project
+          in: query
+          schema: { type: string }
+        - name: active
+          in: query
+          schema: { type: boolean, default: true }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/RecordSummary" }
+    post:
+      summary: Create a record — validate, generate, persist, commit to the output repo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecordInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Record" }
+        "400": { description: Validation error (missing required var, type mismatch, duplicate instance name, etc.) }
+        "409": { description: "(customer, project, env) already exists" }
+
+  /records/preview:
+    post:
+      summary: Validate + generate without persisting or committing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecordInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PreviewResult" }
+        "400": { description: Validation error }
+
+  /records/{id}:
+    get:
+      summary: Get a record (for viewing or repopulating the edit form)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Record" }
+        "404": { description: Not found }
+    put:
+      summary: Update a record — validate, generate, persist, commit a new version
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: If-Match
+          in: header
+          required: true
+          description: The record's last-seen updated_at/version, for optimistic concurrency
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecordInput" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Record" }
+        "400": { description: Validation error }
+        "409": { description: Stale write (If-Match doesn't match current version) }
+    delete:
+      summary: Soft-delete a record. Output repo files are never auto-removed.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204": { description: Soft-deleted }
+        "404": { description: Not found }
+
+  /records/{id}/preview:
+    put:
+      summary: Preview an edit, diffed against the currently committed version
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecordInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PreviewResult" }
+
+  /records/{id}/sync-status:
+    get:
+      summary: Get the record's DB/git sync status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sync_status: { type: string, enum: [pending, synced, failed] }
+                  last_commit_sha: { type: string, nullable: true }
+
+  /records/{id}/retry-sync:
+    post:
+      summary: Retry committing a failed record to the output repo
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "202": { description: Retry triggered }
+        "404": { description: Not found }
+        "409": { description: Record is not in a failed sync_status }
+
+components:
+  securitySchemes:
+    sessionAuth:
+      type: apiKey
+      in: cookie
+      name: tf_automation_session
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        username: { type: string }
+        auth_provider: { type: string, enum: [local, oidc] }
+        roles:
+          type: array
+          items: { type: string, enum: [requester, admin, approver] }
+        is_admin:
+          type: boolean
+          description: Computed convenience field, true iff "admin" is in roles. Retained for Phase 1 API compatibility — prefer `roles` in new code.
+
+    AuditLogEntry:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        actor_user_id: { type: string, format: uuid, nullable: true }
+        actor_username: { type: string }
+        action: { type: string, example: "record.create" }
+        resource_type: { type: string, enum: [record, catalog, naming_template, customer] }
+        resource_id: { type: string, nullable: true }
+        detail: { type: object, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    Customer:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        business_short_code: { type: string }
+
+    NamingTemplate:
+      type: object
+      required: [cloud, resource_type, template]
+      properties:
+        cloud: { type: string, enum: [gcp, aws, azure] }
+        resource_type: { type: string, example: gcp_project }
+        template:
+          type: string
+          example: "prj-{business_short_code}-{env}-{user_label}-{num_id}"
+        num_id_width: { type: integer, default: 2 }
+
+    CatalogEntry:
+      type: object
+      properties:
+        module_name: { type: string }
+        display_name: { type: string }
+        category: { type: string }
+        cloud: { type: string, enum: [aws, azure, gcp, multi] }
+        icon: { type: string }
+        description: { type: string }
+        latest_version_tag: { type: string, example: "vm-instance/v1.2.0" }
+        naming_resource_type: { type: string, nullable: true }
+
+    ModuleSchema:
+      type: object
+      properties:
+        module_name: { type: string }
+        version_tag: { type: string }
+        metadata: { type: object, description: "Parsed metadata.yaml" }
+        variables:
+          type: array
+          description: VarSchema[] — see contracts/var-schema.schema.json
+          items: { type: object }
+
+    ModuleInstanceInput:
+      type: object
+      required: [module_name, instances]
+      properties:
+        module_name: { type: string }
+        pinned_version:
+          type: string
+          nullable: true
+          description: Omit on create to pin the latest tag at submission time; set on edit to keep the existing pin.
+        instances:
+          type: object
+          description: 'Map keyed by instance name, e.g. {"web-01": {...}}'
+          additionalProperties: { type: object }
+
+    RecordInput:
+      type: object
+      required: [customer_name, project_name, env_name, module_selections]
+      properties:
+        customer_name: { type: string }
+        project_name: { type: string }
+        env_name: { type: string }
+        module_selections:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/ModuleInstanceInput" }
+
+    PreviewResult:
+      type: object
+      properties:
+        files:
+          type: object
+          description: Relative path -> file content, e.g. "main.tf", "vm-instance.auto.tfvars", "backend.tf"
+          additionalProperties: { type: string }
+        suggested_names:
+          type: object
+          description: module_name.instance_name -> tentative Naming Convention Engine suggestion (not yet allocated)
+          additionalProperties: { type: string }
+        diff:
+          type: string
+          nullable: true
+          description: Unified diff against the currently committed version, present only for edit-preview
+
+    RecordSummary:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        customer_name: { type: string }
+        project_name: { type: string }
+        env_name: { type: string }
+        output_path: { type: string }
+        is_active: { type: boolean }
+        sync_status: { type: string, enum: [pending, synced, failed] }
+        updated_at: { type: string, format: date-time }
+
+    Record:
+      allOf:
+        - $ref: "#/components/schemas/RecordSummary"
+        - type: object
+          properties:
+            module_selections:
+              type: array
+              items: { $ref: "#/components/schemas/ModuleInstanceInput" }
+            last_commit_sha: { type: string, nullable: true }
+            created_by: { type: string }
+            created_at: { type: string, format: date-time }
+            updated_by: { type: string }
