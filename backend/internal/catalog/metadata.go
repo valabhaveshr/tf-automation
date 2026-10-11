@@ -11,6 +11,7 @@ package catalog
 
 import (
 	"fmt"
+	"path"
 
 	"gopkg.in/yaml.v3"
 )
@@ -21,7 +22,7 @@ import (
 // catalog-eligible; see the "Catalog / schema parsing" edge-case table for
 // what happens when it's missing, malformed, or its name doesn't match.
 type ModuleMetadata struct {
-	Name                 string `yaml:"name" json:"name"`                                     // must match the module's folder name
+	Name                 string `yaml:"name" json:"name"`                                     // must match the module's leaf folder name or its full path under modules/
 	DisplayName          string `yaml:"display_name" json:"display_name"`
 	Category             string `yaml:"category" json:"category"`
 	Cloud                string `yaml:"cloud" json:"cloud"`                                     // aws | azure | gcp | multi
@@ -33,8 +34,12 @@ type ModuleMetadata struct {
 }
 
 // ParseMetadataFile parses a metadata.yaml file's raw bytes and validates
-// that its declared `name` matches moduleName -- the folder (and tag-derived
-// module) name it was fetched for.
+// that its declared `name` matches moduleName -- the tag-derived module
+// path it was fetched for. moduleName may be nested ("compute/instance"),
+// so `name` may be either the leaf folder name ("instance") or the full
+// path ("compute/instance"); module identity is always the path, which is
+// unique by construction, so two nested modules sharing a leaf name never
+// collide.
 //
 // Per plan/ARCHITECTURE.md § Edge cases -> "Catalog / schema parsing":
 // "metadata.yaml's name field doesn't match its folder name -> Validation
@@ -44,23 +49,14 @@ type ModuleMetadata struct {
 // non-fatal, per-module ModuleIssue shape, keeping this function a pure
 // parse+validate step with no knowledge of the "flagged, not fatal"
 // refresh-orchestration concern.
-//
-// Note on the "two modules declare the same metadata.yaml name" edge case:
-// because Service always fetches modules/<moduleName>/metadata.yaml using
-// the tag/folder-derived name and then requires md.Name == moduleName here,
-// two distinct module folders can never both pass validation while
-// declaring the same name -- at least one of them would fail this exact
-// check first (its declared name would equal the *other* folder's name, not
-// its own). That edge case is therefore already covered by this function's
-// existing mismatch check rather than needing a separate cross-module
-// duplicate scan.
 func ParseMetadataFile(moduleName string, src []byte) (*ModuleMetadata, error) {
 	var md ModuleMetadata
 	if err := yaml.Unmarshal(src, &md); err != nil {
 		return nil, fmt.Errorf("catalog: parsing metadata.yaml: %w", err)
 	}
-	if md.Name != moduleName {
-		return nil, fmt.Errorf("catalog: metadata.yaml name %q does not match module folder %q", md.Name, moduleName)
+	if md.Name != moduleName && md.Name != path.Base(moduleName) {
+		return nil, fmt.Errorf("catalog: metadata.yaml name %q does not match module folder %q (use %q or %q)",
+			md.Name, moduleName, path.Base(moduleName), moduleName)
 	}
 	return &md, nil
 }

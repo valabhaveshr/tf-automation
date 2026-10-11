@@ -69,13 +69,20 @@ Create two **new, empty** repos (they don't need to be public):
 - `<your-account>/tf-automation-output` — where generated code lands
 
 In the modules repo, add at least one module following the convention (see
-`contracts/var-schema.example.json` for the shape this exercises):
+`contracts/var-schema.example.json` for the shape this exercises). Modules can sit
+directly under `modules/` or be nested in subfolders to any depth — the module's name
+is its folder path under `modules/` (`vm-instance`, or `compute/instance` for
+`modules/compute/instance/`), and that full path is what goes in the tag:
 
 ```
 modules/
   vm-instance/
     variables.tf
     metadata.yaml
+  compute/
+    instance/          # nested: module name "compute/instance", tag compute/instance/v1.0.0
+      variables.tf
+      metadata.yaml    # name: instance   (or name: compute/instance)
 ```
 
 `variables.tf`:
@@ -107,11 +114,16 @@ instance_label_field: "name"
 ```
 
 Commit both files to `main`, then **tag the commit** — module versioning is entirely
-tag-driven, an untagged module never appears in the catalog:
+tag-driven, an untagged module never appears in the catalog. The tag prefix is the
+module's path, either relative to `modules/` or including it — both forms name the same
+module, and the highest version across them wins:
 ```bash
 git tag vm-instance/v1.0.0
+git tag compute/instance/v1.0.0             # for modules/compute/instance
+git tag modules/compute/instance/v1.1.0     # same module, prefixed form
 git push origin main --tags
 ```
+If your modules folder isn't called `modules`, set `MODULES_PATH` for the backend (§ 4).
 
 **Credentials** — for a fast first pass, use a PAT instead of registering a GitHub App:
 create a classic PAT with `repo` scope on your account, covering both repos.

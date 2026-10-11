@@ -148,6 +148,7 @@ paths:
         - name: moduleName
           in: path
           required: true
+          description: 'The module path under modules/, e.g. "vm-instance" or "compute/instance". Slashes in a nested name are sent as path separators ("/catalog/compute/instance/schema"); "%2F" is also accepted.'
           schema: { type: string }
         - name: ref
           in: query

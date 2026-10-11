@@ -77,11 +77,15 @@ type VarSchema struct {
 // pinned git-tag version, its variable schema (as parsed at that pinned
 // version), and the set of user-configured instances for it.
 type ModuleInput struct {
-	// ModuleName is the module's folder/catalog name, e.g. "vm-instance".
-	// Must be a safe, already-validated identifier: it is used verbatim as
-	// an HCL block label and as a prefix of the generated root variable
-	// name (e.g. "vm_instance_instances"), and appears in the generated
-	// module source URL path segment.
+	// ModuleName is the module's catalog name: its folder path relative to
+	// the modules repo's modules directory, e.g. "vm-instance" or, for a
+	// nested module, "compute/instance". Validated by RenderRootFiles
+	// (slash-separated segments of letters, digits, '-' and '_', starting
+	// with a letter). Slashes and hyphens map to underscores for the HCL
+	// block label and root variable name ("compute_instance_instances"),
+	// slashes to hyphens for the tfvars file name
+	// ("compute-instance.auto.tfvars"), and the path is used as-is in the
+	// generated module source URL.
 	ModuleName string `json:"module_name"`
 
 	// PinnedVersion is the exact git tag pinned at submission time, e.g.
@@ -108,11 +112,14 @@ type ModuleInput struct {
 type RecordInput struct {
 	Modules []ModuleInput `json:"modules"`
 
-	// ModulesRepoOrg is the GitHub org/user that hosts the modules repo,
-	// used to build each module's `source = "git::https://github.com/<org>/modules.git//<module>?ref=..."`
-	// URL. Optional; defaults to "org" (matching plan/ARCHITECTURE.md's
-	// illustrative example literally) when empty, so callers that haven't
-	// wired real config through yet still get a deterministic, valid
-	// source URL rather than an error.
-	ModulesRepoOrg string `json:"modules_repo_org,omitempty"`
+	// ModulesRepoOrg, ModulesRepoName and ModulesPath build each module's
+	// `source = "git::https://github.com/<org>/<repo>.git//<path>/<module>?ref=..."`
+	// URL. All optional: org defaults to "org" and repo to "modules"
+	// (matching plan/ARCHITECTURE.md's illustrative example literally), and
+	// an empty ModulesPath puts the module at the repo root, so callers
+	// that haven't wired real config through yet still get a
+	// deterministic, valid source URL rather than an error.
+	ModulesRepoOrg  string `json:"modules_repo_org,omitempty"`
+	ModulesRepoName string `json:"modules_repo_name,omitempty"`
+	ModulesPath     string `json:"modules_path,omitempty"`
 }

@@ -84,8 +84,10 @@ func (s *Server) renderFiles(resolved []*resolvedModule) (map[string][]byte, err
 	}
 
 	files, err := codegen.RenderRootFiles(codegen.RecordInput{
-		Modules:        modules,
-		ModulesRepoOrg: s.ModulesRepoOwner,
+		Modules:         modules,
+		ModulesRepoOrg:  s.ModulesRepoOwner,
+		ModulesRepoName: s.ModulesRepoName,
+		ModulesPath:     s.ModulesPath,
 	})
 	if err != nil {
 		return nil, asValidation(err)

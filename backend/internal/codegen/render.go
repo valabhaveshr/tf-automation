@@ -19,6 +19,10 @@ import (
 // illustrative "github.com/org/modules.git" example literally).
 const defaultModulesRepoOrg = "org"
 
+// defaultModulesRepoName is used when RecordInput.ModulesRepoName is empty,
+// for the same reason as defaultModulesRepoOrg.
+const defaultModulesRepoName = "modules"
+
 // hclIdentRe is a conservative HCL identifier validator: letters, digits,
 // underscore, hyphen, not starting with a digit. Applied to module names,
 // variable names, and object field names before they are ever emitted as a
@@ -33,6 +37,29 @@ var hclIdentRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*$`)
 
 func isValidHCLIdent(s string) bool {
 	return s != "" && hclIdentRe.MatchString(s)
+}
+
+// moduleNameRe validates ModuleName: slash-separated folder segments (a
+// module may be nested under the modules directory, e.g.
+// "compute/instance"), starting with a letter so the derived identifier
+// (see moduleIdent) is a valid HCL identifier, and with no "."/".."
+// segments since the name also becomes a repo path in the source URL.
+// catalog.modulePathPattern applies the same rule at catalog refresh time.
+var moduleNameRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*(/[A-Za-z0-9][A-Za-z0-9_-]*)*$`)
+
+// moduleIdent maps a module name to the identifier used for its module
+// block label and "<ident>_instances" root variable: "vm-instance" ->
+// "vm_instance", "compute/instance" -> "compute_instance".
+func moduleIdent(moduleName string) string {
+	return strings.NewReplacer("/", "_", "-", "_").Replace(moduleName)
+}
+
+// moduleFileStem maps a module name to its .auto.tfvars file name stem.
+// Slashes become hyphens so every file stays in the record's root directory
+// (Terraform only auto-loads *.auto.tfvars from the root module directory):
+// "compute/instance" -> "compute-instance".
+func moduleFileStem(moduleName string) string {
+	return strings.ReplaceAll(moduleName, "/", "-")
 }
 
 // instanceNameRe matches ARCHITECTURE.md's edge-case rule for instance
@@ -455,26 +482,37 @@ func RenderRootFiles(record RecordInput) (map[string][]byte, error) {
 	if org == "" {
 		org = defaultModulesRepoOrg
 	}
+	repoName := record.ModulesRepoName
+	if repoName == "" {
+		repoName = defaultModulesRepoName
+	}
+	modulesPath := strings.Trim(record.ModulesPath, "/")
 
 	varsFile := hclwrite.NewEmptyFile()
 	mainFile := hclwrite.NewEmptyFile()
 	out := make(map[string][]byte, len(record.Modules)*2+2)
 
-	seenModules := make(map[string]bool, len(record.Modules))
+	// Keyed by the derived identifier, not the raw name: two distinct names
+	// that map to the same identifier (and therefore the same file stem),
+	// e.g. "compute/instance" and "compute-instance", would otherwise
+	// silently overwrite each other's block and .auto.tfvars file.
+	seenModules := make(map[string]string, len(record.Modules))
 
 	for i, mod := range record.Modules {
-		if !isValidHCLIdent(mod.ModuleName) {
-			return nil, fmt.Errorf("codegen: module name %q is not a valid identifier", mod.ModuleName)
+		if !moduleNameRe.MatchString(mod.ModuleName) {
+			return nil, fmt.Errorf("codegen: module name %q is not a valid module path", mod.ModuleName)
 		}
-		if seenModules[mod.ModuleName] {
-			return nil, fmt.Errorf("codegen: duplicate module %q in record", mod.ModuleName)
-		}
-		seenModules[mod.ModuleName] = true
-
-		sanitized := strings.ReplaceAll(mod.ModuleName, "-", "_")
+		sanitized := moduleIdent(mod.ModuleName)
 		if !isValidHCLIdent(sanitized) {
 			return nil, fmt.Errorf("codegen: module name %q does not produce a valid HCL identifier", mod.ModuleName)
 		}
+		if prev, dup := seenModules[sanitized]; dup {
+			if prev == mod.ModuleName {
+				return nil, fmt.Errorf("codegen: duplicate module %q in record", mod.ModuleName)
+			}
+			return nil, fmt.Errorf("codegen: modules %q and %q both map to identifier %q", prev, mod.ModuleName, sanitized)
+		}
+		seenModules[sanitized] = mod.ModuleName
 		instancesVarName := sanitized + "_instances"
 
 		varNames := make(map[string]bool, len(mod.Variables))
@@ -506,9 +544,13 @@ func RenderRootFiles(record RecordInput) (map[string][]byte, error) {
 		modBlock := mainFile.Body().AppendNewBlock("module", []string{sanitized})
 		modBody := modBlock.Body()
 
+		modulePath := mod.ModuleName
+		if modulesPath != "" {
+			modulePath = modulesPath + "/" + mod.ModuleName
+		}
 		sourceURL := fmt.Sprintf(
-			"git::https://github.com/%s/modules.git//%s?ref=%s",
-			org, mod.ModuleName, mod.PinnedVersion,
+			"git::https://github.com/%s/%s.git//%s?ref=%s",
+			org, repoName, modulePath, mod.PinnedVersion,
 		)
 		// sourceURL is Go-side string assembly, but it never reaches HCL
 		// source text directly: it is wrapped as a single cty.StringVal and
@@ -566,7 +608,7 @@ func RenderRootFiles(record RecordInput) (map[string][]byte, error) {
 
 		tfvarsFile := hclwrite.NewEmptyFile()
 		tfvarsFile.Body().SetAttributeValue(instancesVarName, topVal)
-		out[mod.ModuleName+".auto.tfvars"] = formatted(tfvarsFile)
+		out[moduleFileStem(mod.ModuleName)+".auto.tfvars"] = formatted(tfvarsFile)
 	}
 
 	out["variables.tf"] = formatted(varsFile)

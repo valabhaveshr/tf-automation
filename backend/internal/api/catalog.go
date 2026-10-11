@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -72,9 +73,14 @@ func (s *Server) handleCatalogList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, entries)
 }
 
-// handleCatalogSchema implements GET /api/catalog/{moduleName}/schema[?ref=].
+// handleCatalogSchema implements GET /api/catalog/{moduleName}/schema[?ref=],
+// mounted as GET /catalog/* so moduleName may be a nested path.
 func (s *Server) handleCatalogSchema(w http.ResponseWriter, r *http.Request) {
-	moduleName := chi.URLParam(r, "moduleName")
+	moduleName, ok := moduleNameFromSchemaPath(chi.URLParam(r, "*"))
+	if !ok {
+		writeErr(w, data.ErrNotFound)
+		return
+	}
 	ref := r.URL.Query().Get("ref")
 
 	ms, err := s.resolveModuleSchema(r.Context(), moduleName, ref)
@@ -89,6 +95,22 @@ func (s *Server) handleCatalogSchema(w http.ResponseWriter, r *http.Request) {
 		Metadata:   json.RawMessage(ms.Metadata),
 		Variables:  json.RawMessage(ms.Variables),
 	})
+}
+
+// moduleNameFromSchemaPath extracts the module name from the wildcard part
+// of GET /catalog/*, which must be "<moduleName>/schema". moduleName may
+// itself contain slashes ("compute/instance/schema"), sent either as-is or
+// URL-encoded as a single segment ("compute%2Finstance/schema"): chi routes
+// on the raw path when it contains escapes, so the value is unescaped here.
+func moduleNameFromSchemaPath(rest string) (string, bool) {
+	if unescaped, err := url.PathUnescape(rest); err == nil {
+		rest = unescaped
+	}
+	moduleName, ok := strings.CutSuffix(rest, "/schema")
+	if !ok || moduleName == "" {
+		return "", false
+	}
+	return moduleName, true
 }
 
 // resolveModuleSchema looks up the pinned version tag if ref is non-empty,

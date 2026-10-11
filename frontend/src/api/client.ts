@@ -130,7 +130,11 @@ export function getCatalog(): Promise<CatalogEntry[]> {
 }
 
 export function getModuleSchema(moduleName: string, ref?: string): Promise<ModuleSchema> {
-  return request<ModuleSchema>(`/catalog/${encodeURIComponent(moduleName)}/schema`, {
+  // Nested module names ("compute/instance") keep their slashes as path
+  // separators; only each segment is encoded. Encoding the slash as %2F
+  // also works against the backend, but some reverse proxies reject it.
+  const modulePath = moduleName.split('/').map(encodeURIComponent).join('/');
+  return request<ModuleSchema>(`/catalog/${modulePath}/schema`, {
     query: { ref },
   });
 }

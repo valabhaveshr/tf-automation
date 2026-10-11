@@ -201,3 +201,23 @@ func TestInMemorySeenDeliveries(t *testing.T) {
 		t.Errorf("expected empty id to never be reported as seen")
 	}
 }
+
+func TestWebhookHandler_CreateEvent_TagWithModulesDirPrefix(t *testing.T) {
+	src := newFakeSource()
+	src.addTag("modules/compute/instance/v1.0.0")
+	src.addFile("modules/compute/instance/v1.0.0", "modules/compute/instance/variables.tf", validVarsTF)
+	src.addFile("modules/compute/instance/v1.0.0", "modules/compute/instance/metadata.yaml", validMetadataYAML("instance"))
+	store := newFakeSchemaStore()
+
+	h, _ := newTestWebhookHandler(t, src, store, "refs/heads/main")
+
+	payload := []byte(`{"ref":"modules/compute/instance/v1.0.0","ref_type":"tag","repository":{"name":"modules","full_name":"org/modules"}}`)
+	sig := sign(payload, h.Secret)
+
+	if err := h.HandleDelivery(context.Background(), "create", "delivery-1", payload, sig); err != nil {
+		t.Fatalf("HandleDelivery returned unexpected error: %v", err)
+	}
+	if store.latest("compute/instance") == nil {
+		t.Fatalf("expected compute/instance to have been refreshed by the create event")
+	}
+}

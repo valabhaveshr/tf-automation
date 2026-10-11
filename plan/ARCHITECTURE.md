@@ -29,7 +29,7 @@ This document is the full plan. `CLAUDE.md` at the project root carries a lean s
 | Multi-instance codegen | Single module block per module type, `for_each` over a map/list variable — not repeated blocks |
 | tfvars structure | **Per-service**: one `<module_name>.auto.tfvars` file per selected module type within a record (not one combined file). Terraform auto-loads `*.auto.tfvars`, so no `-var-file` chaining is needed at apply time |
 | Module discovery | Hybrid: variable schema auto-extracted from `variables.tf`; UI metadata from a required `metadata.yaml` per module |
-| Module versioning | **By git tag**, not commit SHA. Tagging convention: `<module-name>/vX.Y.Z` (monorepo, path-scoped tags — a tag applies to one module). A module with no such tag is excluded from the catalog until it has one. Each instance pins the exact tag used at submission time (`?ref=<module-name>/vX.Y.Z` in generated `module.source`) |
+| Module versioning | **By git tag**, not commit SHA. Tagging convention: `<module-name>/vX.Y.Z` (monorepo, path-scoped tags — a tag applies to one module; `<module-name>` is the module's folder path under `modules/`, e.g. `compute/instance/v1.0.0`; the tag may also include the modules directory, `modules/compute/instance/v1.0.0`, and both forms name the same module). A module with no such tag is excluded from the catalog until it has one. Each instance pins the exact tag used at submission time (`?ref=<module-name>/vX.Y.Z` in generated `module.source`) |
 | Catalog refresh | Primary: GitHub webhook on push to the modules repo **and on tag creation** (`create` events, `ref_type=tag`). Fallback 1: periodic reconciliation scan (catches missed/failed webhook deliveries — GitHub doesn't guarantee delivery). Fallback 2: **manual "refresh catalog" action, visible to admin users only** (gated by a lightweight `users.is_admin` flag in Phase 1, superseded by Phase 3's full role model) |
 | Naming convention | Org-wide, opt-in per module: `metadata.yaml` may declare a `naming_resource_type`; when present, the Naming Convention Engine computes a compliant resource name from an admin-managed template (tokens: `business_short_code`, `env`, `project`, `user_label`, `num_id`) and pre-fills it as the module's designated name variable — **editable by the user, not locked**. Templates are DB-backed and admin-editable via UI. `business_short_code` is captured once per customer in a `customers` registry and reused across that customer's records. The `num_id` token is a per-`(business_short_code, env, resource_type)` auto-incrementing counter, zero-padded to a configurable width (default 2 digits); allocation happens atomically at save time (not preview), and exhausting the width (e.g. passing 99 at width 2) rejects the save with a clear error rather than silently overflowing |
 | Progress tracking | `plan/PROGRESS.md` is updated at the end of every phase (and, within Phase 1, as each workstream completes) with status, completion date, and a short summary — so any future session can see what's done without re-deriving it |
@@ -120,7 +120,7 @@ This ordering means 6 of 9 workstreams (A, B, C, E, F, H) can start on day one o
 ### Feature list
 
 **MVP (ship in Phase 1):**
-- Module discovery from `modules/<name>/{variables.tf, metadata.yaml}` convention, versioned via `<module-name>/vX.Y.Z` git tags
+- Module discovery from `modules/<path>/{variables.tf, metadata.yaml}` convention (nested paths allowed), versioned via `<module-name>/vX.Y.Z` git tags
 - Webhook-driven catalog refresh (push + tag-create events) + periodic reconciliation fallback + **admin-only manual refresh button** (gated by `users.is_admin`; not shown to normal users)
 - Multi-module selection per record
 - Multi-instance support per module (`for_each`-based codegen, unique instance names enforced structurally)
@@ -321,10 +321,15 @@ modules/
     variables.tf      # parsed for the variable schema
     main.tf / outputs.tf / versions.tf   # not parsed by the catalog
     metadata.yaml      # required — UI-only presentation metadata
+  compute/
+    instance/          # modules may be nested to any depth
+      variables.tf
+      metadata.yaml
 ```
+A module's name is its folder path relative to `modules/` — `vm-instance`, `compute/instance` — so two nested folders sharing a leaf name (`compute/instance`, `database/instance`) are distinct modules. Path segments are letters, digits, `-` and `_`, starting with a letter. In generated code the path maps to an identifier with `/` and `-` → `_` (`module "compute_instance"`, `var.compute_instance_instances`) and a tfvars file with `/` → `-` (`compute-instance.auto.tfvars`); two modules mapping to the same identifier in one record are rejected.
 `metadata.yaml`:
 ```yaml
-name: vm-instance                # must match folder name
+name: vm-instance                # must match the leaf folder name ("instance") or full path ("compute/instance")
 display_name: "Virtual Machine Instance"
 category: "Compute"
 cloud: "azure"                   # aws | azure | gcp | multi
@@ -334,7 +339,7 @@ instance_label_field: "name"     # which variable labels each instance in the UI
 naming_resource_type: null       # optional, e.g. "gcp_project" — opt-in into the Naming Convention Engine
 naming_target_variable: null     # which variable receives the computed name; defaults to instance_label_field if set
 ```
-Variable schema is auto-extracted from `variables.tf` using `hclparse` + `typeexpr.TypeConstraint` — Terraform core's own type parser — so nested/object/list types parse correctly without a hand-rolled parser. Modules must be tagged `<module-name>/vX.Y.Z` in the modules repo to be catalog-eligible (Phase 1 pins to the latest such tag by semver at selection time).
+Variable schema is auto-extracted from `variables.tf` using `hclparse` + `typeexpr.TypeConstraint` — Terraform core's own type parser — so nested/object/list types parse correctly without a hand-rolled parser. Modules must be tagged `<module-name>/vX.Y.Z` (the full path for nested modules, e.g. `compute/instance/v1.0.0`, optionally prefixed with the modules directory: `modules/compute/instance/v1.0.0`) in the modules repo to be catalog-eligible (Phase 1 pins to the latest such tag by semver at selection time).
 
 **Data model (PostgreSQL)**
 ```sql

@@ -105,6 +105,8 @@ func run() error {
 		OutputRepoOwner:    cfg.OutputRepoOwner,
 		OutputRepoName:     cfg.OutputRepoName,
 		ModulesRepoOwner:   cfg.ModulesRepoOwner,
+		ModulesRepoName:    cfg.ModulesRepoName,
+		ModulesPath:        cfg.ModulesPath,
 		StateBackendType:   cfg.StateBackendType,
 		StateBackendBucket: cfg.StateBackendBucket,
 	}

@@ -83,6 +83,17 @@ func NewService(source ModulesRepoSource, store *data.Store, modulesPath string)
 // keeps semver comparison in highestTagForModule unambiguous.
 var moduleTagPattern = regexp.MustCompile(`^(.+)/v(\d+)\.(\d+)\.(\d+)$`)
 
+// modulePathPattern restricts module names to slash-separated folder
+// segments under ModulesPath, e.g. "vm-instance" or "compute/instance".
+// Modules may be nested to any depth; the module name IS the folder path
+// relative to ModulesPath, which keeps names unique across the repo (two
+// leaf folders both named "instance" under different parents are distinct
+// modules). The first character must be a letter and segments can't be
+// "." / ".." -- the name later becomes an HCL identifier (slashes and
+// hyphens mapped to underscores, see codegen.RenderRootFiles, which
+// enforces the same rule) and a repo-relative path.
+var modulePathPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*(/[A-Za-z0-9][A-Za-z0-9_-]*)*$`)
+
 // parseTagName splits a git tag into its module name and version, per the
 // "<module-name>/vX.Y.Z" convention (monorepo, path-scoped tags -- a tag
 // applies to exactly one module). ok is false for any tag that doesn't
@@ -95,6 +106,24 @@ func parseTagName(tag string) (moduleName, version string, ok bool) {
 		return "", "", false
 	}
 	return m[1], "v" + m[2] + "." + m[3] + "." + m[4], true
+}
+
+// moduleNameFromTag is parseTagName plus one allowance: the tag may repeat
+// the modules directory as a prefix, so for ModulesPath "modules" both
+// "compute/instance/v1.0.0" and "modules/compute/instance/v1.0.0" name the
+// module "compute/instance" (the folder path relative to ModulesPath). A tag
+// is always read as prefixed when it starts with "<ModulesPath>/", so a
+// folder literally named like ModulesPath directly under it
+// (modules/modules/x) can't be tagged unprefixed.
+func moduleNameFromTag(tag, modulesPath string) (moduleName, version string, ok bool) {
+	moduleName, version, ok = parseTagName(tag)
+	if !ok {
+		return "", "", false
+	}
+	if prefix := strings.Trim(modulesPath, "/"); prefix != "" {
+		moduleName = strings.TrimPrefix(moduleName, prefix+"/")
+	}
+	return moduleName, version, true
 }
 
 // semver is a minimal MAJOR.MINOR.PATCH comparator -- deliberately not a
@@ -136,12 +165,16 @@ func (s semver) less(other semver) bool {
 // plan/ARCHITECTURE.md's "Module has multiple tags" edge case: "Phase 1
 // pins to the latest tag (by semver, not by tag-creation date)". ok is
 // false if no tag matches moduleName -- the "no released version" case.
-func highestTagForModule(tags []string, moduleName string) (tag, version string, ok bool) {
+//
+// Tags with and without the modules-directory prefix (see
+// moduleNameFromTag) count as the same module, so the highest version wins
+// regardless of which form each tag used.
+func highestTagForModule(tags []string, moduleName, modulesPath string) (tag, version string, ok bool) {
 	var bestTag, bestVersion string
 	var best semver
 	found := false
 	for _, t := range tags {
-		name, ver, matched := parseTagName(t)
+		name, ver, matched := moduleNameFromTag(t, modulesPath)
 		if !matched || name != moduleName {
 			continue
 		}
@@ -182,16 +215,22 @@ func highestTagForModule(tags []string, moduleName string) (tag, version string,
 // efficiency trade-off, since ListTags is cheap and the whole point of the
 // targeted webhook path is "cheap, single small refresh".
 func (s *Service) RefreshModule(ctx context.Context, moduleName string) error {
+	if !modulePathPattern.MatchString(moduleName) {
+		return newModuleIssue(moduleName, "invalid module path: each folder segment must be letters, digits, '-' or '_', and the path must start with a letter")
+	}
+
 	tags, err := s.Source.ListTags(ctx)
 	if err != nil {
 		return fmt.Errorf("catalog: refreshing %q: listing tags: %w", moduleName, err)
 	}
 
-	tag, version, ok := highestTagForModule(tags, moduleName)
+	tag, version, ok := highestTagForModule(tags, moduleName, s.ModulesPath)
 	if !ok {
 		return newModuleIssue(moduleName, "no released version: no %s/vX.Y.Z tag found", moduleName)
 	}
 
+	// moduleName is the folder path relative to ModulesPath, so a nested
+	// module "compute/instance" is read from modules/compute/instance/.
 	varsPath := s.ModulesPath + "/" + moduleName + "/variables.tf"
 	metaPath := s.ModulesPath + "/" + moduleName + "/metadata.yaml"
 
@@ -276,7 +315,7 @@ func (s *Service) RefreshAll(ctx context.Context) ([]*ModuleIssue, error) {
 
 	moduleNames := make(map[string]struct{})
 	for _, t := range tags {
-		name, _, ok := parseTagName(t)
+		name, _, ok := moduleNameFromTag(t, s.ModulesPath)
 		if !ok {
 			continue
 		}

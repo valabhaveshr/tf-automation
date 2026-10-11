@@ -245,7 +245,7 @@ func (h *WebhookHandler) handleCreate(ctx context.Context, payload []byte) error
 		return nil
 	}
 
-	moduleName, _, ok := parseTagName(p.Ref)
+	moduleName, _, ok := moduleNameFromTag(p.Ref, h.Service.ModulesPath)
 	if !ok {
 		h.Logger.Printf("catalog: webhook: ignoring non-module tag %q", p.Ref)
 		return nil

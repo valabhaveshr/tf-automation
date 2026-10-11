@@ -39,9 +39,12 @@ type Server struct {
 	OutputRepoOwner string
 	OutputRepoName  string
 
-	// ModulesRepoOwner feeds codegen.RecordInput.ModulesRepoOrg so
-	// generated `module.source` URLs point at the real modules repo.
+	// ModulesRepoOwner/ModulesRepoName/ModulesPath feed
+	// codegen.RecordInput so generated `module.source` URLs point at the
+	// real modules repo and directory.
 	ModulesRepoOwner string
+	ModulesRepoName  string
+	ModulesPath      string
 
 	// StateBackendType/StateBackendBucket configure the one-time
 	// backend.tf generated at first save (codegen.RenderBackendFile).
@@ -90,7 +93,10 @@ func (s *Server) Routes() http.Handler {
 		}
 
 		r.With(s.Sessions.RequireAuth).Get("/catalog", s.handleCatalogList)
-		r.With(s.Sessions.RequireAuth).Get("/catalog/{moduleName}/schema", s.handleCatalogSchema)
+		// Wildcard rather than "/catalog/{moduleName}/schema": nested module
+		// names contain slashes ("compute/instance"), which a single chi
+		// path parameter can't match. handleCatalogSchema parses the rest.
+		r.With(s.Sessions.RequireAuth).Get("/catalog/*", s.handleCatalogSchema)
 
 		r.With(s.Sessions.RequireAuth, auth.RequireAdmin).Post("/catalog/refresh", s.handleCatalogRefresh)
 

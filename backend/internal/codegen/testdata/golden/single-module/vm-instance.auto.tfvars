@@ -4,8 +4,8 @@ vm_instance_instances = {
     image          = "ubuntu-22.04"
     name           = "prj-acme1-prod-web-01"
     size           = "Standard_B2s"
-    tags           = {
-      "env" = "prod"
+    tags = {
+      env = "prod"
     }
   }
   web-02 = {

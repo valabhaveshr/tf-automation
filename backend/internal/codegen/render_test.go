@@ -1,10 +1,12 @@
 package codegen
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -202,5 +204,75 @@ func TestRenderRootFiles_MissingRequiredValue(t *testing.T) {
 	_, err := RenderRootFiles(record)
 	if err == nil {
 		t.Fatal("expected an error for a missing required value, got nil")
+	}
+}
+
+func TestRenderRootFiles_NestedModuleName(t *testing.T) {
+	record := RecordInput{
+		Modules: []ModuleInput{{
+			ModuleName:    "compute/instance",
+			PinnedVersion: "compute/instance/v1.0.0",
+			Variables:     []VarSchema{{Name: "size", Type: "string", HasDefault: true, Default: "small"}},
+			Instances:     map[string]map[string]any{"web-01": {}},
+		}},
+		ModulesRepoOrg:  "acme",
+		ModulesRepoName: "tf-modules",
+		ModulesPath:     "modules",
+	}
+	files, err := RenderRootFiles(record)
+	if err != nil {
+		t.Fatalf("RenderRootFiles: %v", err)
+	}
+
+	// Slashes in the module name must not create a subdirectory: Terraform
+	// only auto-loads *.auto.tfvars from the root module directory.
+	tfvars, ok := files["compute-instance.auto.tfvars"]
+	if !ok {
+		t.Fatalf("expected compute-instance.auto.tfvars, got files %v", keysOf(files))
+	}
+	if !bytes.Contains(tfvars, []byte("compute_instance_instances")) {
+		t.Errorf("tfvars does not set compute_instance_instances:\n%s", tfvars)
+	}
+
+	mainTF := string(files["main.tf"])
+	for _, want := range []string{
+		`module "compute_instance" {`,
+		`"git::https://github.com/acme/tf-modules.git//modules/compute/instance?ref=compute/instance/v1.0.0"`,
+		`var.compute_instance_instances`,
+	} {
+		if !strings.Contains(mainTF, want) {
+			t.Errorf("main.tf missing %s:\n%s", want, mainTF)
+		}
+	}
+}
+
+func TestRenderRootFiles_ModuleNamesMappingToSameIdentifier(t *testing.T) {
+	mod := func(name string) ModuleInput {
+		return ModuleInput{
+			ModuleName:    name,
+			PinnedVersion: name + "/v1.0.0",
+			Variables:     []VarSchema{{Name: "size", Type: "string", HasDefault: true, Default: "x"}},
+			Instances:     map[string]map[string]any{"a": {}},
+		}
+	}
+	// Both map to identifier "compute_instance" and file stem
+	// "compute-instance"; rendering both would silently clobber one.
+	_, err := RenderRootFiles(RecordInput{Modules: []ModuleInput{mod("compute/instance"), mod("compute-instance")}})
+	if err == nil {
+		t.Fatal("expected an error for two module names mapping to the same identifier, got nil")
+	}
+}
+
+func TestRenderRootFiles_InvalidModulePath(t *testing.T) {
+	for _, name := range []string{"compute/../secrets", "/compute", "compute/", "9lives", "compute instance"} {
+		_, err := RenderRootFiles(RecordInput{Modules: []ModuleInput{{
+			ModuleName:    name,
+			PinnedVersion: "x/v1.0.0",
+			Variables:     []VarSchema{{Name: "size", Type: "string", HasDefault: true, Default: "x"}},
+			Instances:     map[string]map[string]any{"a": {}},
+		}}})
+		if err == nil {
+			t.Errorf("module name %q: expected an error, got nil", name)
+		}
 	}
 }

@@ -73,6 +73,20 @@ instance_label_field: "name"
 	}
 }
 
+func TestParseMetadataFile_NestedModuleName(t *testing.T) {
+	for _, name := range []string{"instance", "compute/instance"} {
+		src := []byte("name: " + name + "\ndisplay_name: \"Instance\"\n")
+		if _, err := ParseMetadataFile("compute/instance", src); err != nil {
+			t.Errorf("name %q for nested module compute/instance: unexpected error %v", name, err)
+		}
+	}
+
+	src := []byte("name: compute\ndisplay_name: \"Instance\"\n")
+	if _, err := ParseMetadataFile("compute/instance", src); err == nil {
+		t.Errorf("expected an error for name %q, which is the parent folder, not the module", "compute")
+	}
+}
+
 func TestParseMetadataFile_MalformedYAML(t *testing.T) {
 	src := []byte("name: [this is not\nvalid: yaml: at: all")
 

@@ -216,6 +216,100 @@ func TestRefreshModule_MalformedVariablesFileIsFatalToTheModuleOnly(t *testing.T
 	}
 }
 
+func TestRefreshAll_NestedModulePaths(t *testing.T) {
+	src := newFakeSource()
+
+	// Two nested modules sharing the leaf folder name "instance": the
+	// module name is the full path under modules/, so they don't collide.
+	// metadata.yaml may name the module by its leaf folder or full path.
+	src.addTag("compute/instance/v1.0.0")
+	src.addFile("compute/instance/v1.0.0", "modules/compute/instance/variables.tf", validVarsTF)
+	src.addFile("compute/instance/v1.0.0", "modules/compute/instance/metadata.yaml", validMetadataYAML("instance"))
+
+	src.addTag("database/instance/v0.2.0")
+	src.addFile("database/instance/v0.2.0", "modules/database/instance/variables.tf", validVarsTF)
+	src.addFile("database/instance/v0.2.0", "modules/database/instance/metadata.yaml", validMetadataYAML("database/instance"))
+
+	store := newFakeSchemaStore()
+	svc := &Service{Source: src, Store: store, ModulesPath: "modules"}
+
+	issues, err := svc.RefreshAll(context.Background())
+	if err != nil {
+		t.Fatalf("RefreshAll returned unexpected error: %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("RefreshAll returned unexpected issues: %+v", issues)
+	}
+	if row := store.latest("compute/instance"); row == nil || row.VersionTag != "compute/instance/v1.0.0" {
+		t.Fatalf("compute/instance not cataloged as expected, got %+v", row)
+	}
+	if row := store.latest("database/instance"); row == nil || row.VersionTag != "database/instance/v0.2.0" {
+		t.Fatalf("database/instance not cataloged as expected, got %+v", row)
+	}
+}
+
+func TestRefreshAll_TagsWithModulesDirPrefix(t *testing.T) {
+	src := newFakeSource()
+
+	// Prefixed and unprefixed tags for the same module are one module; the
+	// highest version wins whichever form it was tagged with.
+	src.addTag("compute/instance/v1.0.0")
+	src.addTag("modules/compute/instance/v1.1.0")
+	src.addFile("modules/compute/instance/v1.1.0", "modules/compute/instance/variables.tf", validVarsTF)
+	src.addFile("modules/compute/instance/v1.1.0", "modules/compute/instance/metadata.yaml", validMetadataYAML("instance"))
+
+	store := newFakeSchemaStore()
+	svc := &Service{Source: src, Store: store, ModulesPath: "modules"}
+
+	issues, err := svc.RefreshAll(context.Background())
+	if err != nil {
+		t.Fatalf("RefreshAll returned unexpected error: %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("RefreshAll returned unexpected issues: %+v", issues)
+	}
+	if store.count() != 1 {
+		t.Fatalf("expected 1 cataloged module row, got %d", store.count())
+	}
+	if row := store.latest("compute/instance"); row == nil || row.VersionTag != "modules/compute/instance/v1.1.0" {
+		t.Fatalf("compute/instance not cataloged as expected, got %+v", row)
+	}
+}
+
+func TestModuleNameFromTag(t *testing.T) {
+	tests := []struct {
+		tag, modulesPath, wantModule string
+		wantOK                       bool
+	}{
+		{"modules/compute/instance/v1.0.0", "modules", "compute/instance", true},
+		{"compute/instance/v1.0.0", "modules", "compute/instance", true},
+		{"modules/vm-instance/v1.0.0", "modules", "vm-instance", true},
+		{"modules/vm-instance/v1.0.0", "", "modules/vm-instance", true},
+		{"infra/modules/x/v1.0.0", "infra/modules", "x", true},
+		{"modules-extra/x/v1.0.0", "modules", "modules-extra/x", true}, // prefix must end at a "/"
+		{"vm-instance/v1.2", "modules", "", false},
+	}
+	for _, tt := range tests {
+		gotModule, _, gotOK := moduleNameFromTag(tt.tag, tt.modulesPath)
+		if gotOK != tt.wantOK || gotModule != tt.wantModule {
+			t.Errorf("moduleNameFromTag(%q, %q) = (%q, %v), want (%q, %v)", tt.tag, tt.modulesPath, gotModule, gotOK, tt.wantModule, tt.wantOK)
+		}
+	}
+}
+
+func TestRefreshModule_InvalidModulePathReturnsIssue(t *testing.T) {
+	src := newFakeSource()
+	src.addTag("compute/../secrets/v1.0.0")
+
+	svc := &Service{Source: src, Store: newFakeSchemaStore(), ModulesPath: "modules"}
+
+	err := svc.RefreshModule(context.Background(), "compute/../secrets")
+	var issue *ModuleIssue
+	if !asModuleIssue(err, &issue) {
+		t.Fatalf("expected a *ModuleIssue for an invalid module path, got %v", err)
+	}
+}
+
 func TestParseTagName(t *testing.T) {
 	tests := []struct {
 		tag         string
@@ -265,7 +359,7 @@ func TestHighestTagForModule(t *testing.T) {
 		"not-a-module-tag",
 	}
 
-	tag, version, ok := highestTagForModule(tags, "module-a")
+	tag, version, ok := highestTagForModule(tags, "module-a", "modules")
 	if !ok {
 		t.Fatalf("expected a highest tag for module-a")
 	}
@@ -273,7 +367,7 @@ func TestHighestTagForModule(t *testing.T) {
 		t.Errorf("got tag=%q version=%q, want tag=%q version=%q", tag, version, "module-a/v2.0.0", "v2.0.0")
 	}
 
-	if _, _, ok := highestTagForModule(tags, "module-nonexistent"); ok {
+	if _, _, ok := highestTagForModule(tags, "module-nonexistent", "modules"); ok {
 		t.Errorf("expected ok=false for a module with no matching tag")
 	}
 }
