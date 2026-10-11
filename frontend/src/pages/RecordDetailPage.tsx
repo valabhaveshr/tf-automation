@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import * as api from '../api/client';
-import type { Record as TfRecord } from '../api/types';
+import type { TfRecord } from '../api/types';
 
 export default function RecordDetailPage() {
   const { id } = useParams<{ id: string }>();

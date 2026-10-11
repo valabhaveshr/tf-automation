@@ -17,7 +17,7 @@ import type {
   ModuleSchema,
   NamingTemplate,
   PreviewResult,
-  Record as TfRecord,
+  TfRecord,
   RecordInput,
   RecordSummary,
   SyncStatusResponse,

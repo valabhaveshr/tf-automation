@@ -160,7 +160,9 @@ export interface RecordSummary {
   updated_at: string;
 }
 
-export interface Record extends RecordSummary {
+// Named TfRecord, not Record: a type named Record here would shadow the built-in
+// Record<K, V> utility type for this whole module.
+export interface TfRecord extends RecordSummary {
   module_selections: ModuleInstanceInput[];
   last_commit_sha: string | null;
   created_by: string;
