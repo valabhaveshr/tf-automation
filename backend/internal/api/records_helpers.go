@@ -67,6 +67,7 @@ func toRecordResponse(rec *data.Record, sels []*data.ModuleSelection, warnings [
 	out := recordResponse{
 		recordSummary: recordSummary{
 			ID:           rec.ID,
+			CustomerID:   rec.CustomerID,
 			CustomerName: rec.CustomerName,
 			ProjectName:  rec.ProjectName,
 			EnvName:      rec.EnvName,

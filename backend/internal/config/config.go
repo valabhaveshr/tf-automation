@@ -15,6 +15,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -128,6 +129,12 @@ type Config struct {
 	// OIDCDefaultRedirectTo is the frontend path landed on after a
 	// successful SSO login when redirect_to is absent or not allowlisted.
 	OIDCDefaultRedirectTo string
+
+	// CookieSecure sets the session cookie's Secure flag (default true).
+	// Set COOKIE_SECURE=false only for test deployments reached over plain
+	// HTTP at a non-localhost address, where browsers discard Secure
+	// cookies and every request after login fails with 401.
+	CookieSecure bool
 }
 
 // usesGitHubApp reports whether GitHub App credentials (rather than a PAT)
@@ -179,6 +186,7 @@ func requireEnv(missing *[]string, key string) string {
 //	OIDC_REDIRECT_URL                 (required if OIDC_ISSUER_URL is set)
 //	OIDC_ALLOWED_REDIRECT_PREFIXES    (comma-separated, optional)
 //	OIDC_DEFAULT_REDIRECT_TO          (default "/")
+//	COOKIE_SECURE                     (default "true"; "false" only for plain-HTTP test deployments)
 func Load() (*Config, error) {
 	var missing []string
 
@@ -198,6 +206,15 @@ func Load() (*Config, error) {
 
 	secret := requireEnv(&missing, "JWT_SIGNING_SECRET")
 	cfg.JWTSigningSecret = []byte(secret)
+
+	cfg.CookieSecure = true
+	if raw := os.Getenv("COOKIE_SECURE"); raw != "" {
+		v, err := strconv.ParseBool(raw)
+		if err != nil {
+			return nil, fmt.Errorf("config: COOKIE_SECURE: %w", err)
+		}
+		cfg.CookieSecure = v
+	}
 
 	cfg.GitHubToken = os.Getenv("GITHUB_TOKEN")
 	if cfg.GitHubToken == "" {

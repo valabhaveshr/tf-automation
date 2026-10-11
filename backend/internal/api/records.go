@@ -40,12 +40,22 @@ func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request, recordID 
 		writeErr(w, badRequest("invalid request body"))
 		return
 	}
-	if err := validateRecordInputShape(req); err != nil {
-		writeErr(w, badRequest(err.Error()))
+	ctx := r.Context()
+
+	var existing *data.Record
+	if recordID != nil {
+		rec, err := s.Store.GetRecord(ctx, *recordID)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		existing = rec
+	}
+	customer, err := s.prepareRecordInput(ctx, r, &req, existing)
+	if err != nil {
+		writeErr(w, err)
 		return
 	}
-
-	ctx := r.Context()
 
 	resolved, err := s.resolveModules(ctx, req.ModuleSelections)
 	if err != nil {
@@ -53,11 +63,7 @@ func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request, recordID 
 		return
 	}
 
-	cust, err := s.resolveCustomer(ctx, req.CustomerName)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
+	cust := toResolvedCustomer(customer)
 
 	suggestedNames := make(map[string]string)
 	var warnings []string
@@ -120,12 +126,13 @@ func (s *Server) handleCreateRecord(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, badRequest("invalid request body"))
 		return
 	}
-	if err := validateRecordInputShape(req); err != nil {
-		writeErr(w, badRequest(err.Error()))
+	ctx := r.Context()
+
+	customer, err := s.prepareRecordInput(ctx, r, &req, nil)
+	if err != nil {
+		writeErr(w, err)
 		return
 	}
-
-	ctx := r.Context()
 
 	resolved, err := s.resolveModules(ctx, req.ModuleSelections)
 	if err != nil {
@@ -133,11 +140,7 @@ func (s *Server) handleCreateRecord(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cust, err := s.resolveCustomer(ctx, req.CustomerName)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
+	cust := toResolvedCustomer(customer)
 
 	// Allocate (burns counters) for every naming-enabled module BEFORE the
 	// DB transaction. See records_tx.go's doc comment for why this can't
@@ -165,11 +168,7 @@ func (s *Server) handleCreateRecord(w http.ResponseWriter, r *http.Request) {
 
 	outputPath := buildOutputPath(req.CustomerName, req.ProjectName, req.EnvName)
 
-	var customerID *uuid.UUID
-	if cust.found {
-		id := cust.id
-		customerID = &id
-	}
+	customerID := &customer.ID
 
 	rec := &data.Record{
 		CustomerName: req.CustomerName,
@@ -238,14 +237,15 @@ func (s *Server) handleUpdateRecord(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, badRequest("invalid request body"))
 		return
 	}
-	if err := validateRecordInputShape(req); err != nil {
-		writeErr(w, badRequest(err.Error()))
-		return
-	}
-
 	ctx := r.Context()
 
 	existing, err := s.Store.GetRecord(ctx, id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+
+	customer, err := s.prepareRecordInput(ctx, r, &req, existing)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -257,11 +257,7 @@ func (s *Server) handleUpdateRecord(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cust, err := s.resolveCustomer(ctx, req.CustomerName)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
+	cust := toResolvedCustomer(customer)
 
 	// Same non-atomic-with-DB-insert caveat as create; see that handler's
 	// comment and records_tx.go's doc comment.
@@ -284,11 +280,7 @@ func (s *Server) handleUpdateRecord(w http.ResponseWriter, r *http.Request) {
 
 	outputPath := buildOutputPath(req.CustomerName, req.ProjectName, req.EnvName)
 
-	var customerID *uuid.UUID
-	if cust.found {
-		cid := cust.id
-		customerID = &cid
-	}
+	customerID := &customer.ID
 
 	updated := &data.Record{
 		ID:            existing.ID,

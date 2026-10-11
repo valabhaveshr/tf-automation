@@ -66,6 +66,7 @@ func (s *Store) GetRecord(ctx context.Context, id uuid.UUID) (*Record, error) {
 
 // ListRecordsFilter narrows ListRecords; nil fields are not filtered on.
 type ListRecordsFilter struct {
+	CustomerID   *uuid.UUID // tenancy scope; see api.tenant
 	CustomerName *string
 	ProjectName  *string
 	Active       *bool
@@ -77,6 +78,10 @@ func (s *Store) ListRecords(ctx context.Context, f ListRecordsFilter) ([]*Record
 	q := `SELECT ` + recordColumns + ` FROM records WHERE TRUE`
 	var args []any
 
+	if f.CustomerID != nil {
+		args = append(args, *f.CustomerID)
+		q += fmt.Sprintf(" AND customer_id = $%d", len(args))
+	}
 	if f.CustomerName != nil {
 		args = append(args, *f.CustomerName)
 		q += fmt.Sprintf(" AND customer_name = $%d", len(args))

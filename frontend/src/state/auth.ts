@@ -1,80 +1,68 @@
 /**
- * Minimal current-user store. Session identity itself lives server-side in
- * the tf_automation_session cookie (see api/client.ts); this context just
- * caches the logged-in User so components (e.g. CatalogBrowser's admin-only
- * refresh button) can read is_admin without an extra round trip per render.
+ * Current-session store. Session identity itself lives server-side in the
+ * tf_automation_session cookie (see api/client.ts); this context caches
+ * GET /auth/me — the user, their customer, and the routing flags
+ * (needs_onboarding, platform/customer admin) — so components don't refetch
+ * it per render.
+ *
+ * `refresh()` re-reads /auth/me after anything that changes it: login,
+ * accepting an invitation, completing onboarding, editing the organization.
  */
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import type { User } from '../api/types';
+import type { Me } from '../api/types';
 import * as api from '../api/client';
 
 export interface AuthApi {
-  user: User | null;
-  loading: boolean;
-  login: (username: string, password: string) => Promise<User>;
+  me: Me | null;
+  /** True until the first /auth/me check finishes, so guards don't bounce to /login on a valid session. */
+  initializing: boolean;
+  login: (username: string, password: string) => Promise<Me | null>;
   logout: () => Promise<void>;
+  refresh: () => Promise<Me | null>;
 }
 
 const AuthContext = createContext<AuthApi | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [me, setMe] = useState<Me | null>(null);
+  const [initializing, setInitializing] = useState(true);
 
-  // Closes the gap App.tsx previously flagged: GET /auth/sso/callback is a
-  // full browser redirect (the SPA is torn down and reloaded), so any
-  // in-memory `user` state from an explicit login call is lost by the time
-  // the app lands back on e.g. /records. Without this, `user` stays null
-  // forever after an SSO login and RequireAuth bounces to /login even
-  // though the session cookie is valid. Calling GET /auth/me on mount
-  // recovers identity from the cookie alone. A 401 here just means "not
-  // logged in yet" (the common case on a fresh visit) -- not an error to
-  // surface, `user` simply stays null and RequireAuth routes to /login as
-  // before.
-  //
-  // Note: this fetch is async, so on the very first render after a
-  // full-page load `user` is still null -- a route gated by App.tsx's
-  // RequireAuth will render its /login redirect before this resolves.
-  // LoginPage already re-navigates to /records once `user` becomes
-  // non-null (see its own useEffect), so the net effect is a brief flash
-  // through /login rather than a hard bounce; a loading-aware route guard
-  // in App.tsx would remove that flash entirely but is out of this file's
-  // scope.
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .getCurrentUser()
-      .then((res) => {
-        if (!cancelled) {
-          setUser(res.user);
-        }
-      })
-      .catch(() => {
-        // No valid session, or a transient network error -- leave user
-        // null.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const login = useCallback(async (username: string, password: string) => {
-    setLoading(true);
+  const refresh = useCallback(async () => {
     try {
-      const res = await api.login({ username, password });
-      setUser(res.user);
-      return res.user;
-    } finally {
-      setLoading(false);
+      const res = await api.getCurrentUser();
+      setMe(res);
+      return res;
+    } catch {
+      // 401 = no valid session; anything else also leaves us signed out.
+      setMe(null);
+      return null;
     }
   }, []);
 
+  useEffect(() => {
+    refresh().finally(() => setInitializing(false));
+  }, [refresh]);
+
+  const login = useCallback(
+    async (username: string, password: string) => {
+      await api.login({ username, password });
+      return refresh();
+    },
+    [refresh],
+  );
+
   const logout = useCallback(async () => {
-    await api.logout();
-    setUser(null);
+    try {
+      await api.logout();
+    } finally {
+      setMe(null);
+    }
   }, []);
 
-  const value = useMemo<AuthApi>(() => ({ user, loading, login, logout }), [user, loading, login, logout]);
+  const value = useMemo<AuthApi>(
+    () => ({ me, initializing, login, logout, refresh }),
+    [me, initializing, login, logout, refresh],
+  );
 
   return React.createElement(AuthContext.Provider, { value }, children);
 }

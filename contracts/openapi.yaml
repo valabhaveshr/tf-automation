@@ -62,10 +62,7 @@ paths:
           description: OK
           content:
             application/json:
-              schema:
-                type: object
-                properties:
-                  user: { $ref: "#/components/schemas/User" }
+              schema: { $ref: "#/components/schemas/Me" }
         "401": { description: No valid session }
 
   /auth/sso/login:
@@ -246,6 +243,11 @@ paths:
     get:
       summary: List records
       parameters:
+        - name: customer_id
+          in: query
+          required: false
+          description: Platform admins only, restricts to one customer. Customer users always see only their own customer's records.
+          schema: { type: string, format: uuid }
         - name: customer
           in: query
           schema: { type: string }
@@ -398,6 +400,180 @@ paths:
         "404": { description: Not found }
         "409": { description: Record is not in a failed sync_status }
 
+  # ---------------------------------------------------------------------------
+  # Customer tenancy (migration 000003). Customer users only ever see their own
+  # customer's records; platform admins (admin role, no customer) see all.
+  # ---------------------------------------------------------------------------
+  /healthz:
+    get:
+      summary: Liveness/readiness probe (checks Postgres)
+      security: []
+      responses:
+        "200": { description: OK }
+        "503": { description: Database unreachable }
+
+  /onboarding:
+    post:
+      summary: Invited customer admin creates their organization (first sign-in only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CustomerProfile" }
+      responses:
+        "201":
+          description: Created; the caller now belongs to this customer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Customer" }
+        "400": { description: Validation failed (e.g. short name not 1-5 letters/digits) }
+        "409": { description: Short name or organization name already taken, or onboarding already complete }
+
+  /customer:
+    get:
+      summary: The caller's own customer profile
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Customer" }
+        "403": { description: Caller has no customer yet }
+    put:
+      summary: Edit the caller's customer profile (customer admins; business_short_code is ignored)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CustomerProfile" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Customer" }
+        "403": { description: Not a customer admin }
+
+  /customer/users:
+    get:
+      summary: Members of the caller's customer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/TeamMember" }
+
+  /admin/customers/{id}/users:
+    get:
+      summary: Members of any customer (platform admins)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/TeamMember" }
+
+  /invitations:
+    get:
+      summary: Invitations (platform admins see all; customer admins see their customer's)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Invitation" }
+        "403": { description: Not a platform or customer admin }
+    post:
+      summary: >
+        Create an invitation. Platform admins omit customer_id to invite a new customer's
+        first admin (role must be customer_admin), or name an existing customer. Customer
+        admins always invite into their own customer.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+                role: { type: string, enum: [requester, customer_admin], default: requester }
+                customer_id: { type: string, format: uuid }
+      responses:
+        "201":
+          description: Created. invite_path is returned only here; the token itself is never stored.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Invitation" }
+        "403": { description: Not a platform or customer admin }
+
+  /invitations/{id}:
+    delete:
+      summary: Revoke a pending invitation
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Revoked }
+        "404": { description: No pending invitation with this id in the caller's scope }
+
+  /invite/{token}:
+    get:
+      summary: What an invitation link is for (public)
+      security: []
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  email: { type: string }
+                  role: { type: string, enum: [requester, customer_admin] }
+                  customer_name: { type: string, description: Empty for a new customer (onboarding follows) }
+                  expires_at: { type: string, format: date-time }
+        "404": { description: Invalid, expired, revoked or already used }
+
+  /invite/{token}/accept:
+    post:
+      summary: Accept an invitation; creates the account and sets the session cookie (public)
+      security: []
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string }
+                password: { type: string, format: password, minLength: 8 }
+      responses:
+        "201":
+          description: Created and signed in
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: "#/components/schemas/User" }
+        "400": { description: Invalid username (3-64 of letters, digits, . _ @ -) or password shorter than 8 }
+        "404": { description: Invalid, expired, revoked or already used }
+        "409": { description: Username already taken }
+
 components:
   securitySchemes:
     sessionAuth:
@@ -414,7 +590,7 @@ components:
         auth_provider: { type: string, enum: [local, oidc] }
         roles:
           type: array
-          items: { type: string, enum: [requester, admin, approver] }
+          items: { type: string, enum: [requester, admin, approver, customer_admin] }
         is_admin:
           type: boolean
           description: Computed convenience field, true iff "admin" is in roles. Retained for Phase 1 API compatibility — prefer `roles` in new code.
@@ -432,11 +608,64 @@ components:
         created_at: { type: string, format: date-time }
 
     Customer:
+      allOf:
+        - type: object
+          properties:
+            id: { type: string, format: uuid }
+            created_at: { type: string, format: date-time }
+        - $ref: "#/components/schemas/CustomerProfile"
+
+    CustomerProfile:
+      type: object
+      required: [name, business_short_code]
+      properties:
+        name: { type: string, description: 'Organization name, e.g. "Doha Marine Sports Centre"' }
+        business_short_code:
+          type: string
+          description: 'Unique short name, 1-5 letters/digits, case-insensitive (stored lowercase), e.g. "DMSC". Fixed after onboarding for customer admins.'
+        contact_name: { type: string }
+        contact_email: { type: string }
+        contact_phone: { type: string }
+        country: { type: string }
+        industry: { type: string }
+        default_cloud: { type: string, enum: [gcp, aws, azure] }
+        default_region: { type: string }
+        gcp_organization_id: { type: string }
+        billing_account_id: { type: string }
+
+    Me:
+      type: object
+      properties:
+        user: { $ref: "#/components/schemas/User" }
+        customer:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/Customer" }]
+        needs_onboarding: { type: boolean, description: Customer admin who has not created their organization yet }
+        is_platform_admin: { type: boolean }
+        is_customer_admin: { type: boolean }
+
+    TeamMember:
       type: object
       properties:
         id: { type: string, format: uuid }
-        name: { type: string }
-        business_short_code: { type: string }
+        username: { type: string }
+        email: { type: string }
+        roles: { type: array, items: { type: string } }
+        created_at: { type: string, format: date-time }
+
+    Invitation:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string }
+        role: { type: string, enum: [requester, customer_admin] }
+        customer_id: { type: string, format: uuid, nullable: true }
+        customer_name: { type: string }
+        invited_by: { type: string }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        status: { type: string, enum: [pending, accepted, revoked, expired] }
+        invite_path: { type: string, description: 'Only in the create response, e.g. "/invite/<token>"' }
 
     NamingTemplate:
       type: object
@@ -466,7 +695,11 @@ components:
       properties:
         module_name: { type: string }
         version_tag: { type: string }
-        metadata: { type: object, description: "Parsed metadata.yaml" }
+        metadata:
+          type: object
+          description: >
+            Parsed metadata.yaml. `variables` is an ordered array of per-variable UI hints
+            ({name, example, group, advanced}) from metadata.yaml's `variables:` mapping.
         variables:
           type: array
           description: VarSchema[] — see contracts/var-schema.schema.json
@@ -488,9 +721,13 @@ components:
 
     RecordInput:
       type: object
-      required: [customer_name, project_name, env_name, module_selections]
+      required: [project_name, env_name, module_selections]
       properties:
-        customer_name: { type: string }
+        customer_id:
+          type: string
+          format: uuid
+          description: Required for platform admins; ignored for customer users (their own customer always applies).
+        customer_name: { type: string, description: Ignored; overwritten with the customer's registry name. }
         project_name: { type: string }
         env_name: { type: string }
         module_selections:
@@ -518,6 +755,7 @@ components:
       type: object
       properties:
         id: { type: string, format: uuid }
+        customer_id: { type: string, format: uuid, nullable: true }
         customer_name: { type: string }
         project_name: { type: string }
         env_name: { type: string }

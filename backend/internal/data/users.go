@@ -17,10 +17,10 @@ import (
 // it comes from the separate user_roles join table (GetUserRoles), not a
 // users-table column, so callers that need it call GetUserRoles
 // explicitly.
-const userColumns = `id, username, password_hash, is_admin, sso_subject, auth_provider, created_at`
+const userColumns = `id, username, password_hash, is_admin, sso_subject, auth_provider, created_at, customer_id, email`
 
 func scanUser(row rowScanner, u *User) error {
-	return row.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.IsAdmin, &u.SSOSubject, &u.AuthProvider, &u.CreatedAt)
+	return row.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.IsAdmin, &u.SSOSubject, &u.AuthProvider, &u.CreatedAt, &u.CustomerID, &u.Email)
 }
 
 // CreateUser inserts a new user. Callers must hash the password themselves
@@ -43,9 +43,9 @@ func (s *Store) CreateUser(ctx context.Context, u *User) (*User, error) {
 	if authProvider == "" {
 		authProvider = "local"
 	}
-	q := `INSERT INTO users (username, password_hash, is_admin, sso_subject, auth_provider) VALUES ($1, $2, $3, $4, $5)
+	q := `INSERT INTO users (username, password_hash, is_admin, sso_subject, auth_provider, customer_id, email) VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING ` + userColumns
-	row := s.pool.QueryRow(ctx, q, u.Username, u.PasswordHash, u.IsAdmin, u.SSOSubject, authProvider)
+	row := s.pool.QueryRow(ctx, q, u.Username, u.PasswordHash, u.IsAdmin, u.SSOSubject, authProvider, u.CustomerID, u.Email)
 	out := &User{}
 	if err := scanUser(row, out); err != nil {
 		return nil, fmt.Errorf("data: create user: %w", wrapConflict(err))
@@ -158,6 +158,35 @@ func (s *Store) ListUsers(ctx context.Context) ([]*User, error) {
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("data: list users: %w", err)
+	}
+	return out, nil
+}
+
+// ListUsersByCustomer returns the users belonging to one customer, ordered
+// by username, each with Roles populated.
+func (s *Store) ListUsersByCustomer(ctx context.Context, customerID uuid.UUID) ([]*User, error) {
+	q := `SELECT ` + userColumns + ` FROM users WHERE customer_id = $1 ORDER BY username`
+	rows, err := s.pool.Query(ctx, q, customerID)
+	if err != nil {
+		return nil, fmt.Errorf("data: list users by customer: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*User
+	for rows.Next() {
+		u := &User{}
+		if err := scanUser(rows, u); err != nil {
+			return nil, fmt.Errorf("data: list users by customer: scan: %w", err)
+		}
+		out = append(out, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("data: list users by customer: %w", err)
+	}
+	for _, u := range out {
+		if u.Roles, err = s.GetUserRoles(ctx, u.ID); err != nil {
+			return nil, err
+		}
 	}
 	return out, nil
 }

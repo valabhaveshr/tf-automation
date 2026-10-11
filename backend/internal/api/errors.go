@@ -135,6 +135,10 @@ func friendlyConflictMessage(c *data.ConflictError) string {
 		return "this customer/project/env already exists, did you mean to edit it?"
 	case "customers_name_key":
 		return "a customer with this name already exists"
+	case "customers_business_short_code_key":
+		return "this customer short name is already taken; choose another"
+	case "users_username_key":
+		return "this username is already taken"
 	case "module_selections_record_id_module_name_key":
 		return "this module is already selected for this record"
 	default:

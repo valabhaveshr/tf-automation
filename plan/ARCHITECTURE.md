@@ -338,7 +338,18 @@ description: "Provisions a single VM with configurable size, image, and networki
 instance_label_field: "name"     # which variable labels each instance in the UI
 naming_resource_type: null       # optional, e.g. "gcp_project" — opt-in into the Naming Convention Engine
 naming_target_variable: null     # which variable receives the computed name; defaults to instance_label_field if set
+variables:                       # per-variable UI hints, in form order (Terraform variable blocks can't carry custom fields)
+  machine_type:
+    example: "e2-standard-2"     # shown on the "e" hover; "Use this example" fills the field
+    group: "Basics"              # form section heading
+  enable_ip_forwarding:
+    example: "false"
+    group: "Networking"
+    advanced: true               # collapsed under "Advanced settings" (never applied to required variables)
 ```
+The "i" hover shows the variable's `description` from `variables.tf`, plus its type, default and validation messages. A `string` variable validated by `contains([...], var.x)` renders as a dropdown of those values.
+
+Portal modules are **flattened**: one module call creates one resource, with scalar variables (`string`, `number`, `bool`, `list(string)`, `map(string)`), because the portal itself provides multiplicity via `for_each` over instances. Avoid `optional(type, default)` inside object types: the schema parser (`typeexpr.TypeConstraint`) rejects it, so the whole variable degrades to "unsupported" and renders as a raw-JSON box. Plain `optional(type)` works. The portal-ready modules live in `C:\repos\tf-modules`.
 Variable schema is auto-extracted from `variables.tf` using `hclparse` + `typeexpr.TypeConstraint` — Terraform core's own type parser — so nested/object/list types parse correctly without a hand-rolled parser. Modules must be tagged `<module-name>/vX.Y.Z` (the full path for nested modules, e.g. `compute/instance/v1.0.0`, optionally prefixed with the modules directory: `modules/compute/instance/v1.0.0`) in the modules repo to be catalog-eligible (Phase 1 pins to the latest such tag by semver at selection time).
 
 **Data model (PostgreSQL)**
@@ -613,3 +624,52 @@ Phase 2 (drift/policy hook into the plan/apply pipeline); Phase 3 improves alert
 | Alert fatigue from noisy drift detection | Start with high-signal drift categories (resource deleted/replaced) before attribute-level diffs. |
 | Policy false positives blocking legitimate applies | Ship policies in warn-only mode first, flip to blocking once false-positive rate is acceptable. |
 | Cost estimate accuracy varies across 3 clouds | Treat estimates as directional and clearly labeled, not a billing guarantee. |
+
+## Customer tenancy and portal UI (added 2026-10-11)
+
+Added after Phase 1/3 code-complete, at the user's request. Decisions are in CLAUDE.md's Locked Decisions table (Tenancy, Frontend, Modules repo, Deployment).
+
+**Model.** Multi-tenant, invite-only.
+
+| Who | How identified | Sees / can do |
+|---|---|---|
+| Platform admin | `admin` role, `users.customer_id IS NULL` (created by `seed-admin`) | All customers' resources (optional `?customer_id=` filter); creates resources for a chosen customer (`customer_id` required); invites customers; catalog refresh; audit log |
+| Customer admin | `customer_admin` role + `customer_id` | Own customer's resources; edits the organization profile (not the short name); invites members/admins into own customer |
+| Customer member | `requester` role + `customer_id` | Own customer's resources (create/edit/delete) |
+| Invited customer admin before onboarding | `customer_admin`, no customer | Only `POST /api/onboarding`; every resource endpoint returns 403 "complete onboarding" |
+| Anyone else without a customer (e.g. new SSO user) | — | "No organization yet" screen |
+
+**Enforcement** is server-side in `internal/api/tenancy.go`. The caller's customer is loaded from the DB on every request (not trusted from the JWT, since onboarding changes it after the cookie is issued). A record belonging to another customer returns **404**, not 403, so record IDs aren't confirmed across tenants. For customer users, any `customer_id` / `customer_name` in a request is ignored and replaced with their own customer.
+
+**Flow.**
+1. The platform admin creates an invitation, either for a new customer or for an existing one.
+2. The invitee opens `/invite/<token>` and picks a username and password; the account is created and signed in.
+3. If the invitation was for a new customer, onboarding creates the customer and links the user in one transaction.
+4. Customer admins then invite their own team.
+
+**Data (migration 000003).**
+- `customers` gains the profile columns, plus a unique index on `lower(business_short_code)`, which rejects duplicate short names case-insensitively.
+- `users` gains `customer_id` and `email`.
+- New `invitations` table (only a SHA-256 of the token is stored; invitations expire after 7 days).
+- New `customer_admin` role.
+
+**Edge cases.**
+
+| Case | Behavior |
+|---|---|
+| Duplicate short name at onboarding ("DMSC" vs existing "dmsc") | 409 "this customer short name is already taken"; no customer row created, user stays unlinked |
+| Invitation link reused, revoked or expired | 404 with one generic message (doesn't reveal which) |
+| Username taken when accepting | 409; the invitation stays usable |
+| Customer admin edits short name | Ignored, because it's baked into generated names and naming counters; a platform admin can still change it via `/admin/customers` |
+| Records created before tenancy (`customer_id` NULL) | Visible to platform admins only |
+
+**UI.** Mantine AppShell with a left navigation panel. Records are called **Resources** in the UI.
+- *Home:* resources list with stats and filters.
+- *New resource:*
+  - request details;
+  - a searchable module dropdown showing name, path, cloud and version;
+  - one color-accented pane per module, with instances as tabs (add, duplicate, rename, remove) and fields grouped by `metadata.yaml` sections;
+  - a sticky review panel;
+  - a preview drawer (file tabs, plus a diff when editing).
+- *Customer pages:* Team, Organization.
+- *Platform-admin pages:* Customers, Audit log.

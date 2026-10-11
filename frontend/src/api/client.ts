@@ -11,9 +11,14 @@ import type {
   AuditLogEntry,
   AuditLogResourceType,
   Customer,
+  CustomerProfileInput,
   CatalogEntry,
+  Invitation,
+  InvitationPreview,
+  InvitationRole,
   LoginRequest,
   LoginResponse,
+  Me,
   ModuleSchema,
   NamingTemplate,
   PreviewResult,
@@ -21,6 +26,7 @@ import type {
   RecordInput,
   RecordSummary,
   SyncStatusResponse,
+  TeamMember,
 } from './types';
 
 const API_BASE = '/api';
@@ -75,7 +81,13 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const payload = isJson ? await res.json().catch(() => undefined) : undefined;
 
   if (!res.ok) {
-    throw new ApiError(res.status, `${opts.method ?? 'GET'} ${path} failed with ${res.status}`, payload);
+    // The backend's JSON errors are {"error": "<human-readable message>"};
+    // surface that rather than the bare status where there is one.
+    const serverMessage =
+      payload && typeof payload === 'object' && typeof (payload as { error?: unknown }).error === 'string'
+        ? (payload as { error: string }).error
+        : undefined;
+    throw new ApiError(res.status, serverMessage ?? `${opts.method ?? 'GET'} ${path} failed with ${res.status}`, payload);
   }
 
   return payload as T;
@@ -101,8 +113,8 @@ export function logout(): Promise<void> {
  * on mount (see state/auth.ts's AuthProvider). Throws ApiError with status
  * 401 if there is no valid session.
  */
-export function getCurrentUser(): Promise<LoginResponse> {
-  return request<LoginResponse>('/auth/me');
+export function getCurrentUser(): Promise<Me> {
+  return request<Me>('/auth/me');
 }
 
 /**
@@ -181,7 +193,8 @@ export function getAuditLog(filter?: {
 // ---------------------------------------------------------------------------
 
 export function listRecords(params?: {
-  customer?: string;
+  /** Platform admins only: restrict to one customer. */
+  customer_id?: string;
   project?: string;
   active?: boolean;
 }): Promise<RecordSummary[]> {
@@ -232,4 +245,61 @@ export function getSyncStatus(id: string): Promise<SyncStatusResponse> {
 
 export function retrySync(id: string): Promise<void> {
   return request<void>(`/records/${encodeURIComponent(id)}/retry-sync`, { method: 'POST' });
+}
+
+// ---------------------------------------------------------------------------
+// Customer tenancy: onboarding, organization profile, team, invitations
+// ---------------------------------------------------------------------------
+
+/** First login of an invited customer admin: creates their organization. */
+export function completeOnboarding(input: CustomerProfileInput): Promise<Customer> {
+  return request<Customer>('/onboarding', { method: 'POST', body: input });
+}
+
+export function getMyCustomer(): Promise<Customer> {
+  return request<Customer>('/customer');
+}
+
+/** Customer admins only. The short name can't be changed here. */
+export function updateMyCustomer(input: CustomerProfileInput): Promise<Customer> {
+  return request<Customer>('/customer', { method: 'PUT', body: input });
+}
+
+export function listTeam(): Promise<TeamMember[]> {
+  return request<TeamMember[]>('/customer/users');
+}
+
+/** Platform admins only. */
+export function listCustomerUsers(customerId: string): Promise<TeamMember[]> {
+  return request<TeamMember[]>(`/admin/customers/${encodeURIComponent(customerId)}/users`);
+}
+
+export function listInvitations(): Promise<Invitation[]> {
+  return request<Invitation[]>('/invitations');
+}
+
+/**
+ * Platform admins: omit customer_id to invite a new customer's first admin.
+ * Customer admins: always invites into their own organization.
+ */
+export function createInvitation(input: {
+  email: string;
+  role: InvitationRole;
+  customer_id?: string;
+}): Promise<Invitation> {
+  return request<Invitation>('/invitations', { method: 'POST', body: input });
+}
+
+export function revokeInvitation(id: string): Promise<void> {
+  return request<void>(`/invitations/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+/** Public: what an invite link is for, before accepting it. */
+export function previewInvitation(token: string): Promise<InvitationPreview> {
+  return request<InvitationPreview>(`/invite/${encodeURIComponent(token)}`);
+}
+
+/** Public: creates the account and signs the new user in. */
+export function acceptInvitation(token: string, input: LoginRequest): Promise<LoginResponse> {
+  return request<LoginResponse>(`/invite/${encodeURIComponent(token)}/accept`, { method: 'POST', body: input });
 }

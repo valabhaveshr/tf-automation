@@ -95,3 +95,49 @@ func TestParseMetadataFile_MalformedYAML(t *testing.T) {
 		t.Fatalf("expected an error for malformed YAML")
 	}
 }
+
+func TestParseMetadataFile_VariableHints(t *testing.T) {
+	src := []byte(`
+name: instance
+display_name: "Compute Instance"
+variables:
+  zone:
+    example: "us-central1-a"
+    group: "Basics"
+  boot_disk_size_gb:
+    example: 50
+    group: "Boot disk"
+  network_tags:
+    example: ["web", "allow-ssh"]
+    group: "Networking"
+  enable_ip_forwarding:
+    example: "false"
+    group: "Advanced"
+    advanced: true
+`)
+	md, err := ParseMetadataFile("compute/instance", src)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := VariableHints{
+		{Name: "zone", Example: "us-central1-a", Group: "Basics"},
+		{Name: "boot_disk_size_gb", Example: "50", Group: "Boot disk"},
+		{Name: "network_tags", Example: `["web", "allow-ssh"]`, Group: "Networking"},
+		{Name: "enable_ip_forwarding", Example: "false", Group: "Advanced", Advanced: true},
+	}
+	if len(md.Variables) != len(want) {
+		t.Fatalf("got %d hints, want %d: %+v", len(md.Variables), len(want), md.Variables)
+	}
+	for i := range want {
+		if md.Variables[i] != want[i] {
+			t.Errorf("hint %d = %+v, want %+v", i, md.Variables[i], want[i])
+		}
+	}
+}
+
+func TestParseMetadataFile_VariableHintsMustBeMapping(t *testing.T) {
+	src := []byte("name: instance\nvariables:\n  - zone\n")
+	if _, err := ParseMetadataFile("compute/instance", src); err == nil {
+		t.Fatal("expected an error for a variables: list instead of a mapping")
+	}
+}

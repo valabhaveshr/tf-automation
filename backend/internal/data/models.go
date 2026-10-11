@@ -85,6 +85,12 @@ type User struct {
 	Roles        []string `json:"roles,omitempty"`
 	AuthProvider string   `json:"auth_provider,omitempty"` // "local" | "oidc"
 	SSOSubject   *string  `json:"sso_subject,omitempty"`   // OIDC 'sub' claim; nil for local accounts
+
+	// CustomerID is the tenancy key (migration 000003): the one customer
+	// whose resources this user can see. nil for platform admins, and for a
+	// customer admin who hasn't completed onboarding yet.
+	CustomerID *uuid.UUID `json:"customer_id,omitempty"`
+	Email      string     `json:"email,omitempty"`
 }
 
 // Well-known role names, matching the rows seeded by migration 000002 and
@@ -93,6 +99,11 @@ const (
 	RoleRequester = "requester" // baseline role; every authenticated user has it
 	RoleAdmin     = "admin"     // superset of Phase 1's users.is_admin
 	RoleApprover  = "approver"  // reserved/unused until Phase 2 resumes
+
+	// RoleCustomerAdmin administers one customer: completes onboarding,
+	// edits the customer profile, invites that customer's users. Unlike
+	// RoleAdmin it never grants access outside the user's own customer.
+	RoleCustomerAdmin = "customer_admin"
 )
 
 // Role mirrors the roles table: one of the three fixed, seeded roles a user
@@ -124,6 +135,34 @@ type Customer struct {
 	BusinessShortCode string    `json:"business_short_code"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
+
+	// Profile captured at onboarding (migration 000003). All optional
+	// except Name and BusinessShortCode.
+	ContactName       string `json:"contact_name"`
+	ContactEmail      string `json:"contact_email"`
+	ContactPhone      string `json:"contact_phone"`
+	Country           string `json:"country"`
+	Industry          string `json:"industry"`
+	DefaultCloud      string `json:"default_cloud"`
+	DefaultRegion     string `json:"default_region"`
+	GCPOrganizationID string `json:"gcp_organization_id"`
+	BillingAccountID  string `json:"billing_account_id"`
+}
+
+// Invitation mirrors the invitations table. Only TokenHash is stored; the
+// raw token exists once, in the invite link handed to the inviter.
+type Invitation struct {
+	ID             uuid.UUID  `json:"id"`
+	TokenHash      string     `json:"-"`
+	Email          string     `json:"email"`
+	Role           string     `json:"role"`                  // RoleCustomerAdmin | RoleRequester
+	CustomerID     *uuid.UUID `json:"customer_id,omitempty"` // nil = new customer, onboarding on first login
+	InvitedBy      string     `json:"invited_by"`
+	CreatedAt      time.Time  `json:"created_at"`
+	ExpiresAt      time.Time  `json:"expires_at"`
+	AcceptedAt     *time.Time `json:"accepted_at,omitempty"`
+	AcceptedUserID *uuid.UUID `json:"accepted_user_id,omitempty"`
+	RevokedAt      *time.Time `json:"revoked_at,omitempty"`
 }
 
 // NamingTemplate mirrors the naming_templates table: an admin-managed

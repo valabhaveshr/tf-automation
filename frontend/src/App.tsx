@@ -1,130 +1,85 @@
-import { Navigate, Route, Routes, Link } from 'react-router-dom';
+import type { ReactNode } from 'react';
+import { Center, Loader } from '@mantine/core';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useAuth } from './state/auth';
-import { isAdmin } from './api/types';
+import AppLayout from './layout/AppLayout';
 import LoginPage from './pages/LoginPage';
-import RecordListPage from './pages/RecordListPage';
-import RecordEditorPage from './pages/RecordEditorPage';
-import RecordDetailPage from './pages/RecordDetailPage';
+import AcceptInvitePage from './pages/AcceptInvitePage';
+import OnboardingPage from './pages/OnboardingPage';
+import NoOrganizationPage from './pages/NoOrganizationPage';
+import ResourcesPage from './pages/ResourcesPage';
+import ResourceEditorPage from './pages/ResourceEditorPage';
+import ResourceDetailPage from './pages/ResourceDetailPage';
+import CatalogPage from './pages/CatalogPage';
+import TeamPage from './pages/TeamPage';
+import OrganizationPage from './pages/OrganizationPage';
+import CustomersPage from './pages/CustomersPage';
 import AuditLogPage from './pages/AuditLogPage';
 
 /**
- * SSO callback landing note (see api/client.ts ssoLoginUrl and
- * pages/LoginPage.tsx): GET /auth/sso/callback is a full browser redirect
- * (302) back to this app after setting the session cookie, not an XHR — the
- * SPA is torn down and reloaded from scratch, so any in-memory `user` state
- * is lost. LoginPage requests redirect_to=/records, which RequireAuth below
- * gates on `user` being set.
- *
- * KNOWN GAP (flagged for follow-up, out of this change's file scope): there
- * is currently no bootstrap-on-mount fetch of the current user anywhere in
- * this app (state/auth.ts's AuthProvider only sets `user` as a side effect
- * of an explicit POST /auth/login call), and contracts/openapi.yaml has no
- * "who am I" endpoint (e.g. GET /auth/me) for AuthProvider to call on mount.
- * As-is, landing on /records post-SSO-redirect will bounce back to /login
- * even though the session cookie is valid, because `user` is null on the
- * fresh page load. Fixing this needs: (1) a GET /auth/me (or similar)
- * endpoint added to contracts/openapi.yaml as a coordinated contract change,
- * and (2) AuthProvider calling it in a useEffect on mount before rendering
- * routes. Both are outside frontend/src/{api/types.ts,api/client.ts,
- * pages/LoginPage.tsx,components/CatalogBrowser.tsx,pages/AuditLogPage.tsx,
- * App.tsx} and were left for a follow-up change.
+ * Routing and session guards:
+ *   no session              -> /login (invite links stay public)
+ *   invited customer admin  -> /onboarding until the organization exists
+ *   no organization at all  -> "ask for an invitation" screen
+ *   otherwise               -> the app; platform-admin pages are role-gated
+ *                              here and again server-side.
  */
-function RequireAuth({ children }: { children: JSX.Element }) {
-  const { user } = useAuth();
-  if (!user) {
-    return <Navigate to="/login" replace />;
-  }
-  return children;
-}
-
-/** Admin-only routes (e.g. the audit log): same isAdmin() check as CatalogBrowser's refresh button. */
-function RequireAdmin({ children }: { children: JSX.Element }) {
-  const { user } = useAuth();
-  if (!user) {
-    return <Navigate to="/login" replace />;
-  }
-  if (!isAdmin(user)) {
-    return <Navigate to="/records" replace />;
-  }
-  return children;
-}
-
 export default function App() {
-  const { user, logout } = useAuth();
-
   return (
-    <div className="app-shell">
-      <nav className="app-nav">
-        <Link to="/">tf-automation</Link>
-        {user && <Link to="/records">Records</Link>}
-        {user && <Link to="/records/new">New record</Link>}
-        {user && isAdmin(user) && <Link to="/admin/audit-log">Audit log</Link>}
-        <span style={{ flex: 1 }} />
-        {user ? (
-          <>
-            <span>
-              {user.username} {isAdmin(user) && '(admin)'}
-            </span>
-            <button type="button" onClick={() => logout()}>
-              Log out
-            </button>
-          </>
-        ) : (
-          <Link to="/login">Log in</Link>
-        )}
-      </nav>
-
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route
-          path="/"
-          element={
-            <RequireAuth>
-              <RecordListPage />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/records"
-          element={
-            <RequireAuth>
-              <RecordListPage />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/records/new"
-          element={
-            <RequireAuth>
-              <RecordEditorPage />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/records/:id"
-          element={
-            <RequireAuth>
-              <RecordDetailPage />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/records/:id/edit"
-          element={
-            <RequireAuth>
-              <RecordEditorPage />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/admin/audit-log"
-          element={
-            <RequireAdmin>
-              <AuditLogPage />
-            </RequireAdmin>
-          }
-        />
-      </Routes>
-    </div>
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/invite/:token" element={<AcceptInvitePage />} />
+      <Route
+        path="/onboarding"
+        element={
+          <RequireSession allowOnboarding>
+            <OnboardingPage />
+          </RequireSession>
+        }
+      />
+      <Route path="/*" element={<RequireSession>{<AppRoutes />}</RequireSession>} />
+    </Routes>
   );
+}
+
+function AppRoutes() {
+  const { me } = useAuth();
+  const platform = !!me?.is_platform_admin;
+  return (
+    <AppLayout>
+      <Routes>
+        <Route path="/" element={<ResourcesPage />} />
+        <Route path="/resources/new" element={<ResourceEditorPage />} />
+        <Route path="/resources/:id" element={<ResourceDetailPage />} />
+        <Route path="/resources/:id/edit" element={<ResourceEditorPage />} />
+        <Route path="/catalog" element={<CatalogPage />} />
+        {!platform && <Route path="/team" element={<TeamPage />} />}
+        {!platform && <Route path="/organization" element={<OrganizationPage />} />}
+        {platform && <Route path="/admin/customers" element={<CustomersPage />} />}
+        {platform && <Route path="/admin/audit-log" element={<AuditLogPage />} />}
+        {/* Old "records" URLs from before the rename. */}
+        <Route path="/records" element={<Navigate to="/" replace />} />
+        <Route path="/records/new" element={<Navigate to="/resources/new" replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </AppLayout>
+  );
+}
+
+function RequireSession({ children, allowOnboarding }: { children: ReactNode; allowOnboarding?: boolean }) {
+  const { me, initializing } = useAuth();
+  const location = useLocation();
+
+  if (initializing) {
+    return (
+      <Center h="100vh">
+        <Loader />
+      </Center>
+    );
+  }
+  if (!me) return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
+  if (me.needs_onboarding && !allowOnboarding) return <Navigate to="/onboarding" replace />;
+  if (!me.needs_onboarding && allowOnboarding) return <Navigate to="/" replace />;
+  if (!me.customer && !me.is_platform_admin && !me.needs_onboarding) return <NoOrganizationPage />;
+  return <>{children}</>;
 }

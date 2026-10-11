@@ -1,0 +1,60 @@
+# Full stack: Postgres -> migrations -> backend -> frontend (nginx, port PORTAL_PORT).
+#
+#   cp .env.example .env      # fill in GitHub + secrets
+#   docker compose up -d --build
+#   docker compose run --rm --entrypoint seed-admin backend -username admin -password 'change-me-please'
+#
+# Then open http://<host>:${PORTAL_PORT}. See docs/RUNNING_LOCALLY.md § Docker.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tf
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: tf_automation
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tf -d tf_automation"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # One-shot: applies backend/db/migrations, then exits.
+  migrate:
+    build: ./backend
+    entrypoint: ["migrate", "-path", "/app/migrations", "-database", "postgres://tf:${POSTGRES_PASSWORD}@postgres:5432/tf_automation?sslmode=disable", "up"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://tf:${POSTGRES_PASSWORD}@postgres:5432/tf_automation?sslmode=disable
+      HTTP_ADDR: ":8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    # Not published: the frontend's nginx proxies /api to it. Uncomment to reach it directly.
+    # ports:
+    #   - "8081:8080"
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    environment:
+      BACKEND_URL: http://backend:8080
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${PORTAL_PORT:-8080}:80"
+
+volumes:
+  pgdata:

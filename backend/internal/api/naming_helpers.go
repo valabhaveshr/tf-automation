@@ -26,24 +26,6 @@ type resolvedCustomer struct {
 	found             bool
 }
 
-// resolveCustomer looks up req.customer_name in the customers registry.
-// Per plan/ARCHITECTURE.md, records.customer_id is nullable for
-// "pre-registry rows" -- a record for a customer that was never registered
-// (business_short_code never set) is perfectly valid UNLESS one of its
-// selected modules opts into naming, in which case applyNaming blocks with
-// the documented error. A genuine data.Store error (not ErrNotFound) is
-// propagated so it surfaces as a 500.
-func (s *Server) resolveCustomer(ctx context.Context, customerName string) (resolvedCustomer, error) {
-	c, err := s.Store.GetCustomerByName(ctx, customerName)
-	if err != nil {
-		if errors.Is(err, data.ErrNotFound) {
-			return resolvedCustomer{}, nil
-		}
-		return resolvedCustomer{}, err
-	}
-	return resolvedCustomer{id: c.ID, businessShortCode: c.BusinessShortCode, found: true}, nil
-}
-
 // applyNaming resolves suggested/allocated names for every instance of one
 // naming-enabled module selection, merging each into sel.Instances IN
 // PLACE wherever the target variable is currently empty/missing -- per the

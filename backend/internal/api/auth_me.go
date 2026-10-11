@@ -10,55 +10,49 @@ package api
 
 import (
 	"net/http"
-
-	"tf-automation/backend/internal/auth"
 )
 
+// meResponse is GET /api/auth/me. Customer, NeedsOnboarding and the two
+// scope flags drive the frontend's routing: onboarding first, then the
+// customer's resources, or the platform admin views.
+type meResponse struct {
+	User            userResponse      `json:"user"`
+	Customer        *customerResponse `json:"customer"`
+	NeedsOnboarding bool              `json:"needs_onboarding"`
+	IsPlatformAdmin bool              `json:"is_platform_admin"`
+	IsCustomerAdmin bool              `json:"is_customer_admin"`
+}
+
 // handleAuthMe returns the authenticated caller's current user, re-derived
-// from the DB rather than only the session cookie's claims, so a role
-// change since the session was issued (e.g. an admin granting/revoking a
-// role) is reflected immediately rather than only after the session is
-// reissued.
+// from the DB rather than only the session cookie's claims, so a role or
+// customer change since the session was issued (e.g. completing
+// onboarding) is reflected immediately rather than only after the session
+// is reissued.
 func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
-	claims, ok := auth.UserFromContext(r.Context())
-	if !ok {
-		writeJSONError(w, http.StatusUnauthorized, "unauthorized")
-		return
-	}
-
-	u, err := s.Store.GetUser(r.Context(), claims.UserID)
+	t, err := s.loadTenant(r.Context(), r)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	roles, err := s.Store.GetUserRoles(r.Context(), claims.UserID)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-
-	isAdmin := u.IsAdmin
-	for _, role := range roles {
-		if role == "admin" {
-			isAdmin = true
-			break
-		}
-	}
-
-	authProvider := u.AuthProvider
+	authProvider := t.user.AuthProvider
 	if authProvider == "" {
 		authProvider = "local"
 	}
-
-	writeJSON(w, http.StatusOK, struct {
-		User userResponse `json:"user"`
-	}{
+	out := meResponse{
 		User: userResponse{
-			ID:           u.ID,
-			Username:     u.Username,
+			ID:           t.user.ID,
+			Username:     t.user.Username,
 			AuthProvider: authProvider,
-			Roles:        roles,
-			IsAdmin:      isAdmin,
+			Roles:        t.roles,
+			IsAdmin:      t.platformAdmin,
 		},
-	})
+		NeedsOnboarding: t.needsOnboarding(),
+		IsPlatformAdmin: t.platformAdmin,
+		IsCustomerAdmin: t.customerAdmin && t.customer != nil,
+	}
+	if t.customer != nil {
+		c := toCustomerResponse(t.customer)
+		out.Customer = &c
+	}
+	writeJSON(w, http.StatusOK, out)
 }

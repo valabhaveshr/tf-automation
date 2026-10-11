@@ -1,0 +1,175 @@
+{
+  "module_name": "iam/project-iam",
+  "version_tag": "modules/iam/project-iam/v1.0.0",
+  "metadata": {
+    "icon": "key",
+    "name": "project-iam",
+    "cloud": "gcp",
+    "category": "IAM",
+    "variables": [
+      {
+        "name": "project_id",
+        "group": "Basics",
+        "example": "acme-prod-app-01"
+      },
+      {
+        "name": "member",
+        "group": "Basics",
+        "example": "serviceAccount:sa-app-vm@acme-prod-app-01.iam.gserviceaccount.com"
+      },
+      {
+        "name": "role",
+        "group": "Basics",
+        "example": "roles/logging.logWriter"
+      },
+      {
+        "name": "condition_title",
+        "group": "IAM condition",
+        "example": "temporary-access-until-2026-12-31",
+        "advanced": true
+      },
+      {
+        "name": "condition_expression",
+        "group": "IAM condition",
+        "example": "request.time < timestamp(\"2026-12-31T00:00:00Z\")",
+        "advanced": true
+      },
+      {
+        "name": "condition_description",
+        "group": "IAM condition",
+        "example": "Temporary access for the Q4 migration",
+        "advanced": true
+      },
+      {
+        "name": "allow_privileged_roles",
+        "group": "Security",
+        "example": "false",
+        "advanced": true
+      }
+    ],
+    "description": "Grants one IAM role to one principal on a project (additive, never removes existing access).",
+    "display_name": "Project IAM Grant",
+    "instance_label_field": "member"
+  },
+  "variables": [
+    {
+      "name": "project_id",
+      "type": "string",
+      "nullable": false,
+      "required": true,
+      "type_raw": "string",
+      "sensitive": false,
+      "description": "ID of the GCP project the role is granted on. 6-30 characters: lowercase letters, digits and hyphens, starting with a letter and not ending with a hyphen.",
+      "has_default": false,
+      "validations": [
+        {
+          "condition_raw": "can(regex(\"^[a-z][a-z0-9-]{4,28}[a-z0-9]$\", var.project_id))",
+          "error_message": "project_id must be 6-30 characters of lowercase letters, digits and hyphens, start with a letter and not end with a hyphen."
+        }
+      ]
+    },
+    {
+      "name": "member",
+      "type": "string",
+      "nullable": false,
+      "required": true,
+      "type_raw": "string",
+      "sensitive": false,
+      "description": "Principal that receives the role, with its type prefix: user:alice@example.com, group:devs@example.com, serviceAccount:<sa>@<project>.iam.gserviceaccount.com, domain:example.com, or a principal:// / principalSet:// workload identity. allUsers and allAuthenticatedUsers are rejected.",
+      "has_default": false,
+      "validations": [
+        {
+          "condition_raw": "can(regex(\"^((user|group|serviceAccount|domain|deleted:user|deleted:group|deleted:serviceAccount):[^\\\\s]+|principal(Set)?://[^\\\\s]+)$\", var.member))",
+          "error_message": "member must be a user:, group:, serviceAccount:, domain: or principal(Set):// principal; allUsers and allAuthenticatedUsers are not allowed."
+        }
+      ]
+    },
+    {
+      "name": "role",
+      "type": "string",
+      "nullable": false,
+      "required": true,
+      "type_raw": "string",
+      "sensitive": false,
+      "description": "Role to grant: a predefined role such as roles/compute.viewer, or a custom role as projects/<project>/roles/<id> or organizations/<org-id>/roles/<id>. roles/owner and roles/editor are rejected unless allow_privileged_roles is true.",
+      "has_default": false,
+      "validations": [
+        {
+          "condition_raw": "can(regex(\"^(roles/[a-zA-Z0-9_.]+|projects/[a-z0-9-]+/roles/[a-zA-Z0-9_.]+|organizations/[0-9]+/roles/[a-zA-Z0-9_.]+)$\", var.role))",
+          "error_message": "role must be a predefined (roles/...) or custom (projects/<p>/roles/... or organizations/<id>/roles/...) role name."
+        },
+        {
+          "condition_raw": "var.allow_privileged_roles || !contains([\"roles/owner\", \"roles/editor\"], var.role)",
+          "error_message": "roles/owner and roles/editor violate least privilege; grant a narrower role or set allow_privileged_roles = true."
+        }
+      ]
+    },
+    {
+      "name": "condition_title",
+      "type": "string",
+      "default": null,
+      "nullable": true,
+      "required": false,
+      "type_raw": "string",
+      "sensitive": false,
+      "description": "Title of an optional IAM Condition that limits when the grant applies, for example temporary-access-until-2026-12-31 (max 100 characters). Leave empty for an unconditional grant; set it together with condition_expression.",
+      "has_default": true,
+      "validations": [
+        {
+          "condition_raw": "var.condition_title == null ? true : (length(trimspace(var.condition_title)) > 0 && length(var.condition_title) <= 100)",
+          "error_message": "condition_title must be 1-100 characters and not blank."
+        }
+      ]
+    },
+    {
+      "name": "condition_expression",
+      "type": "string",
+      "default": null,
+      "nullable": true,
+      "required": false,
+      "type_raw": "string",
+      "sensitive": false,
+      "description": "CEL expression of the IAM Condition, for example request.time < timestamp(\"2026-12-31T00:00:00Z\"). Required when condition_title is set; leave empty otherwise.",
+      "has_default": true,
+      "validations": [
+        {
+          "condition_raw": "(var.condition_title == null) == (var.condition_expression == null)",
+          "error_message": "condition_title and condition_expression must be set together (or both left empty)."
+        },
+        {
+          "condition_raw": "var.condition_expression == null ? true : length(trimspace(var.condition_expression)) > 0",
+          "error_message": "condition_expression must not be blank."
+        }
+      ]
+    },
+    {
+      "name": "condition_description",
+      "type": "string",
+      "default": null,
+      "nullable": true,
+      "required": false,
+      "type_raw": "string",
+      "sensitive": false,
+      "description": "Optional free-text description of the IAM Condition, for example Temporary access for the Q4 migration. Only used when condition_title is set.",
+      "has_default": true,
+      "validations": [
+        {
+          "condition_raw": "var.condition_description == null ? true : var.condition_title != null",
+          "error_message": "condition_description needs condition_title and condition_expression to be set."
+        }
+      ]
+    },
+    {
+      "name": "allow_privileged_roles",
+      "type": "bool",
+      "default": false,
+      "nullable": false,
+      "required": false,
+      "type_raw": "bool",
+      "sensitive": false,
+      "description": "Allow granting the basic roles/owner or roles/editor roles. Leave false unless a break-glass grant is explicitly approved.",
+      "has_default": true,
+      "validations": []
+    }
+  ]
+}

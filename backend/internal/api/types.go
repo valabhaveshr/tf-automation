@@ -38,6 +38,16 @@ type customerResponse struct {
 	ID                uuid.UUID `json:"id"`
 	Name              string    `json:"name"`
 	BusinessShortCode string    `json:"business_short_code"`
+	ContactName       string    `json:"contact_name"`
+	ContactEmail      string    `json:"contact_email"`
+	ContactPhone      string    `json:"contact_phone"`
+	Country           string    `json:"country"`
+	Industry          string    `json:"industry"`
+	DefaultCloud      string    `json:"default_cloud"`
+	DefaultRegion     string    `json:"default_region"`
+	GCPOrganizationID string    `json:"gcp_organization_id"`
+	BillingAccountID  string    `json:"billing_account_id"`
+	CreatedAt         time.Time `json:"created_at"`
 }
 
 type namingTemplateResponse struct {
@@ -55,14 +65,14 @@ type namingTemplateRequest struct {
 }
 
 type catalogEntry struct {
-	ModuleName          string  `json:"module_name"`
-	DisplayName         string  `json:"display_name"`
-	Category            string  `json:"category"`
-	Cloud               string  `json:"cloud"`
-	Icon                string  `json:"icon"`
-	Description         string  `json:"description"`
-	LatestVersionTag    string  `json:"latest_version_tag"`
-	NamingResourceType  *string `json:"naming_resource_type"`
+	ModuleName         string  `json:"module_name"`
+	DisplayName        string  `json:"display_name"`
+	Category           string  `json:"category"`
+	Cloud              string  `json:"cloud"`
+	Icon               string  `json:"icon"`
+	Description        string  `json:"description"`
+	LatestVersionTag   string  `json:"latest_version_tag"`
+	NamingResourceType *string `json:"naming_resource_type"`
 }
 
 type moduleSchemaResponse struct {
@@ -76,18 +86,23 @@ type moduleSchemaResponse struct {
 // both as request input (RecordInput.module_selections) and as part of the
 // Record response.
 type moduleInstanceInput struct {
-	ModuleName    string                            `json:"module_name"`
-	PinnedVersion *string                            `json:"pinned_version,omitempty"`
-	Instances     map[string]map[string]any          `json:"instances"`
+	ModuleName    string                    `json:"module_name"`
+	PinnedVersion *string                   `json:"pinned_version,omitempty"`
+	Instances     map[string]map[string]any `json:"instances"`
 }
 
 // recordInput mirrors #/components/schemas/RecordInput, the request body
 // shared by preview/create/update.
 type recordInput struct {
-	CustomerName     string                 `json:"customer_name"`
-	ProjectName      string                 `json:"project_name"`
-	EnvName          string                 `json:"env_name"`
-	ModuleSelections []moduleInstanceInput  `json:"module_selections"`
+	// CustomerID picks the customer when a platform admin creates a
+	// resource; ignored for customer users, whose own customer always
+	// applies. CustomerName is overwritten server-side with the registry
+	// name (see prepareRecordInput) and kept only for compatibility.
+	CustomerID       *uuid.UUID            `json:"customer_id,omitempty"`
+	CustomerName     string                `json:"customer_name"`
+	ProjectName      string                `json:"project_name"`
+	EnvName          string                `json:"env_name"`
+	ModuleSelections []moduleInstanceInput `json:"module_selections"`
 }
 
 // previewResult mirrors #/components/schemas/PreviewResult. Warnings is an
@@ -104,14 +119,15 @@ type previewResult struct {
 
 // recordSummary mirrors #/components/schemas/RecordSummary.
 type recordSummary struct {
-	ID           uuid.UUID `json:"id"`
-	CustomerName string    `json:"customer_name"`
-	ProjectName  string    `json:"project_name"`
-	EnvName      string    `json:"env_name"`
-	OutputPath   string    `json:"output_path"`
-	IsActive     bool      `json:"is_active"`
-	SyncStatus   string    `json:"sync_status"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID           uuid.UUID  `json:"id"`
+	CustomerID   *uuid.UUID `json:"customer_id,omitempty"`
+	CustomerName string     `json:"customer_name"`
+	ProjectName  string     `json:"project_name"`
+	EnvName      string     `json:"env_name"`
+	OutputPath   string     `json:"output_path"`
+	IsActive     bool       `json:"is_active"`
+	SyncStatus   string     `json:"sync_status"`
+	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
 // recordResponse mirrors #/components/schemas/Record (RecordSummary allOf
@@ -119,11 +135,11 @@ type recordSummary struct {
 type recordResponse struct {
 	recordSummary
 	ModuleSelections []moduleInstanceInput `json:"module_selections"`
-	LastCommitSHA    *string                `json:"last_commit_sha,omitempty"`
-	CreatedBy        string                 `json:"created_by"`
-	CreatedAt        time.Time              `json:"created_at"`
-	UpdatedBy        string                 `json:"updated_by"`
-	Warnings         []string               `json:"warnings,omitempty"`
+	LastCommitSHA    *string               `json:"last_commit_sha,omitempty"`
+	CreatedBy        string                `json:"created_by"`
+	CreatedAt        time.Time             `json:"created_at"`
+	UpdatedBy        string                `json:"updated_by"`
+	Warnings         []string              `json:"warnings,omitempty"`
 }
 
 type syncStatusResponse struct {

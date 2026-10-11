@@ -20,6 +20,8 @@ export interface DraftModuleSelection {
 
 export interface RecordDraftState {
   recordId: string | null;
+  /** Platform admins pick the customer; customer users always get their own. */
+  customer_id: string;
   customer_name: string;
   project_name: string;
   env_name: string;
@@ -30,6 +32,7 @@ export interface RecordDraftState {
 
 const emptyDraft: RecordDraftState = {
   recordId: null,
+  customer_id: '',
   customer_name: '',
   project_name: '',
   env_name: '',
@@ -39,12 +42,16 @@ const emptyDraft: RecordDraftState = {
 
 export interface RecordDraftApi {
   draft: RecordDraftState;
-  setCustomerFields: (fields: Partial<Pick<RecordDraftState, 'customer_name' | 'project_name' | 'env_name'>>) => void;
+  setCustomerFields: (
+    fields: Partial<Pick<RecordDraftState, 'customer_id' | 'customer_name' | 'project_name' | 'env_name'>>,
+  ) => void;
   addModule: (schema: ModuleSchema) => void;
   removeModule: (moduleName: string) => void;
   renameInstance: (moduleName: string, oldName: string, newName: string) => void;
   addInstance: (moduleName: string, instanceName: string, initialValues?: InstanceValues) => void;
   removeInstance: (moduleName: string, instanceName: string) => void;
+  duplicateInstance: (moduleName: string, sourceName: string, newName: string) => void;
+  /** value === undefined removes the field, so the module's default applies again. */
   updateInstanceField: (moduleName: string, instanceName: string, varName: string, value: unknown) => void;
   setSuggestedNames: (suggestions: Record<string, string>) => void;
   loadDraft: (state: RecordDraftState) => void;
@@ -58,7 +65,7 @@ export function RecordDraftProvider({ children }: { children: React.ReactNode })
   const [draft, setDraft] = useState<RecordDraftState>(emptyDraft);
 
   const setCustomerFields = useCallback(
-    (fields: Partial<Pick<RecordDraftState, 'customer_name' | 'project_name' | 'env_name'>>) => {
+    (fields: Partial<Pick<RecordDraftState, 'customer_id' | 'customer_name' | 'project_name' | 'env_name'>>) => {
       setDraft((prev) => ({ ...prev, ...fields }));
     },
     [],
@@ -117,6 +124,17 @@ export function RecordDraftProvider({ children }: { children: React.ReactNode })
     }));
   }, []);
 
+  const duplicateInstance = useCallback((moduleName: string, sourceName: string, newName: string) => {
+    setDraft((prev) => ({
+      ...prev,
+      modules: prev.modules.map((m) => {
+        if (m.module_name !== moduleName || !(sourceName in m.instances) || newName in m.instances) return m;
+        const copy = JSON.parse(JSON.stringify(m.instances[sourceName] ?? {})) as InstanceValues;
+        return { ...m, instances: { ...m.instances, [newName]: copy } };
+      }),
+    }));
+  }, []);
+
   const renameInstance = useCallback((moduleName: string, oldName: string, newName: string) => {
     setDraft((prev) => ({
       ...prev,
@@ -138,14 +156,13 @@ export function RecordDraftProvider({ children }: { children: React.ReactNode })
         ...prev,
         modules: prev.modules.map((m) => {
           if (m.module_name !== moduleName) return m;
-          const currentInstance = m.instances[instanceName] ?? {};
-          return {
-            ...m,
-            instances: {
-              ...m.instances,
-              [instanceName]: { ...currentInstance, [varName]: value },
-            },
-          };
+          const nextInstance = { ...(m.instances[instanceName] ?? {}) };
+          if (value === undefined) {
+            delete nextInstance[varName];
+          } else {
+            nextInstance[varName] = value;
+          }
+          return { ...m, instances: { ...m.instances, [instanceName]: nextInstance } };
         }),
       }));
     },
@@ -164,6 +181,7 @@ export function RecordDraftProvider({ children }: { children: React.ReactNode })
 
   const toRecordInput = useCallback((): RecordInput => {
     return {
+      customer_id: draft.customer_id || undefined,
       customer_name: draft.customer_name,
       project_name: draft.project_name,
       env_name: draft.env_name,
@@ -184,6 +202,7 @@ export function RecordDraftProvider({ children }: { children: React.ReactNode })
       renameInstance,
       addInstance,
       removeInstance,
+      duplicateInstance,
       updateInstanceField,
       setSuggestedNames,
       loadDraft,
@@ -198,6 +217,7 @@ export function RecordDraftProvider({ children }: { children: React.ReactNode })
       renameInstance,
       addInstance,
       removeInstance,
+      duplicateInstance,
       updateInstanceField,
       setSuggestedNames,
       loadDraft,

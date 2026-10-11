@@ -16,7 +16,7 @@ func (s *Server) handleListCustomers(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]customerResponse, 0, len(customers))
 	for _, c := range customers {
-		out = append(out, customerResponse{ID: c.ID, Name: c.Name, BusinessShortCode: c.BusinessShortCode})
+		out = append(out, toCustomerResponse(c))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -61,7 +61,7 @@ func (s *Server) handleCreateCustomer(w http.ResponseWriter, r *http.Request) {
 		"business_short_code": c.BusinessShortCode,
 	})
 
-	writeJSON(w, http.StatusCreated, customerResponse{ID: c.ID, Name: c.Name, BusinessShortCode: c.BusinessShortCode})
+	writeJSON(w, http.StatusCreated, toCustomerResponse(c))
 }
 
 // handleListNamingTemplates implements GET /api/admin/naming-templates.

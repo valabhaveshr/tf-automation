@@ -73,7 +73,10 @@ func run() error {
 	outputClient := output.NewClient(ghClient)
 
 	// ---- WS-F: Auth/sessions ----
-	sessions := auth.New(cfg.JWTSigningSecret)
+	sessions := auth.New(cfg.JWTSigningSecret).WithSecureCookies(cfg.CookieSecure)
+	if !cfg.CookieSecure {
+		log.Printf("WARNING: COOKIE_SECURE=false: session cookies are sent over plain HTTP; use only for test deployments")
+	}
 
 	// ---- P3-B/P3-C: OIDC SSO (optional; nil when OIDC_ISSUER_URL is
 	// unset, per auth.NewOIDCProvider's doc comment) ----

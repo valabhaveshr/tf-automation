@@ -1,0 +1,53 @@
+.pane {
+  border-left-width: 5px;
+  border-left-style: solid;
+  overflow: visible;
+}
+
+.header {
+  cursor: pointer;
+  border-radius: var(--mantine-radius-lg) var(--mantine-radius-lg) 0 0;
+}
+
+.header:hover {
+  background: light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6));
+}
+
+.chevron {
+  transition: transform 150ms ease;
+  transform: rotate(-90deg);
+}
+
+.chevron[data-open] {
+  transform: rotate(0deg);
+}
+
+.tabBar {
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
+.tabBar :global(.mantine-Tabs-list)::before {
+  display: none;
+}
+
+.instanceHeader {
+  padding-bottom: var(--mantine-spacing-md);
+  border-bottom: 1px dashed var(--mantine-color-default-border);
+}
+
+.section + .section {
+  padding-top: var(--mantine-spacing-xs);
+}
+
+.sectionTitle {
+  font-size: var(--mantine-font-size-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: var(--mantine-spacing-sm);
+}
+
+.emptyInstances {
+  border: 1px dashed var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-md);
+}

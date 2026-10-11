@@ -7,11 +7,24 @@ import (
 	"tf-automation/backend/internal/data"
 )
 
-// handleListRecords implements GET /api/records[?customer=&project=&active=true].
+// handleListRecords implements GET /api/records[?customer=&project=&active=true],
+// scoped to the caller's customer (platform admins: all customers, or
+// ?customer_id=).
 func (s *Server) handleListRecords(w http.ResponseWriter, r *http.Request) {
+	t, err := s.loadTenant(r.Context(), r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	scope, err := t.recordScope(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+
 	q := r.URL.Query()
 
-	filter := data.ListRecordsFilter{}
+	filter := data.ListRecordsFilter{CustomerID: scope}
 	if v := q.Get("customer"); v != "" {
 		filter.CustomerName = &v
 	}
@@ -39,6 +52,7 @@ func (s *Server) handleListRecords(w http.ResponseWriter, r *http.Request) {
 	for _, rec := range records {
 		out = append(out, recordSummary{
 			ID:           rec.ID,
+			CustomerID:   rec.CustomerID,
 			CustomerName: rec.CustomerName,
 			ProjectName:  rec.ProjectName,
 			EnvName:      rec.EnvName,
@@ -58,7 +72,12 @@ func (s *Server) handleGetRecord(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, badRequest("invalid record id"))
 		return
 	}
-	rec, err := s.Store.GetRecord(r.Context(), id)
+	t, err := s.loadTenant(r.Context(), r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	rec, err := s.loadAccessibleRecord(r.Context(), t, id)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -77,6 +96,15 @@ func (s *Server) handleDeleteRecord(w http.ResponseWriter, r *http.Request) {
 	id, err := parseUUIDParam(r, "id")
 	if err != nil {
 		writeErr(w, badRequest("invalid record id"))
+		return
+	}
+	t, err := s.loadTenant(r.Context(), r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if _, err := s.loadAccessibleRecord(r.Context(), t, id); err != nil {
+		writeErr(w, err)
 		return
 	}
 	if err := s.Store.SoftDeleteRecord(r.Context(), id); err != nil {

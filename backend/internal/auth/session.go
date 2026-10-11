@@ -66,6 +66,10 @@ func containsRole(roles []string, role string) bool {
 type Sessions struct {
 	secret []byte
 	ttl    time.Duration
+	// insecureCookies drops the Secure flag from the session cookie. Only
+	// for test deployments served over plain HTTP on a non-localhost
+	// address, where browsers otherwise discard the cookie.
+	insecureCookies bool
 }
 
 // New constructs a Sessions signer/verifier using the given HMAC secret.
@@ -76,7 +80,17 @@ func New(secret []byte) *Sessions {
 // WithTTL returns a copy of s using a custom session TTL. Primarily useful
 // in tests that need to exercise expiry without sleeping for hours.
 func (s *Sessions) WithTTL(ttl time.Duration) *Sessions {
-	return &Sessions{secret: s.secret, ttl: ttl}
+	out := *s
+	out.ttl = ttl
+	return &out
+}
+
+// WithSecureCookies returns a copy of s that sets the session cookie's
+// Secure flag only if secure is true (the default). See insecureCookies.
+func (s *Sessions) WithSecureCookies(secure bool) *Sessions {
+	out := *s
+	out.insecureCookies = !secure
+	return &out
 }
 
 func (s *Sessions) sign(userID uuid.UUID, username string, roles []string) (string, time.Time, error) {
@@ -122,7 +136,7 @@ func (s *Sessions) IssueSessionCookie(w http.ResponseWriter, userID uuid.UUID, u
 		Path:     "/",
 		Expires:  expiresAt,
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   !s.insecureCookies,
 		SameSite: http.SameSiteLaxMode,
 	})
 	return nil
@@ -139,7 +153,7 @@ func (s *Sessions) ClearSessionCookie(w http.ResponseWriter) {
 		Expires:  time.Unix(0, 0),
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   !s.insecureCookies,
 		SameSite: http.SameSiteLaxMode,
 	})
 }

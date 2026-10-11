@@ -1,0 +1,68 @@
+.wrapper {
+  position: relative;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-md);
+  background: light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-8));
+}
+
+.copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+}
+
+.pre {
+  margin: 0;
+  padding: 14px 16px;
+  font-family: var(--mantine-font-family-monospace);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre;
+  tab-size: 2;
+}
+
+.keyword {
+  color: light-dark(var(--mantine-color-grape-8), var(--mantine-color-grape-3));
+  font-weight: 600;
+}
+
+.attr {
+  color: light-dark(var(--mantine-color-blue-8), var(--mantine-color-blue-3));
+}
+
+.string {
+  color: light-dark(var(--mantine-color-teal-8), var(--mantine-color-teal-3));
+}
+
+.number,
+.literal {
+  color: light-dark(var(--mantine-color-orange-8), var(--mantine-color-orange-3));
+}
+
+.comment {
+  color: var(--mantine-color-dimmed);
+  font-style: italic;
+}
+
+.diffAdd {
+  display: block;
+  background: light-dark(var(--mantine-color-teal-0), rgba(18, 184, 134, 0.15));
+  color: light-dark(var(--mantine-color-teal-9), var(--mantine-color-teal-2));
+}
+
+.diffDel {
+  display: block;
+  background: light-dark(var(--mantine-color-red-0), rgba(250, 82, 82, 0.15));
+  color: light-dark(var(--mantine-color-red-9), var(--mantine-color-red-2));
+}
+
+.diffHunk {
+  display: block;
+  color: light-dark(var(--mantine-color-blue-7), var(--mantine-color-blue-3));
+}
+
+.diffFile {
+  display: block;
+  font-weight: 600;
+}

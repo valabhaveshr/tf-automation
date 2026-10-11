@@ -103,10 +103,32 @@ func (s *Server) Routes() http.Handler {
 		// HMAC-verified instead of session-authenticated, per WS-D.
 		r.Post("/webhooks/github/modules", s.handleWebhook)
 
+		// Public liveness/readiness probe for containers and load balancers.
+		r.Get("/healthz", s.handleHealthz)
+
+		// Customer tenancy (migration 000003). The two /invite/{token}
+		// routes are public: the unguessable token is the credential.
+		r.Get("/invite/{token}", s.handlePreviewInvitation)
+		r.Post("/invite/{token}/accept", s.handleAcceptInvitation)
+		r.With(s.Sessions.RequireAuth).Post("/onboarding", s.handleOnboarding)
+		r.Route("/customer", func(r chi.Router) {
+			r.Use(s.Sessions.RequireAuth)
+			r.Get("/", s.handleGetMyCustomer)
+			r.Put("/", s.handleUpdateMyCustomer)
+			r.Get("/users", s.handleListTeam)
+		})
+		r.Route("/invitations", func(r chi.Router) {
+			r.Use(s.Sessions.RequireAuth)
+			r.Get("/", s.handleListInvitations)
+			r.Post("/", s.handleCreateInvitation)
+			r.Delete("/{id}", s.handleRevokeInvitation)
+		})
+
 		r.Route("/admin", func(r chi.Router) {
 			r.Use(s.Sessions.RequireAuth, auth.RequireAdmin)
 			r.Get("/customers", s.handleListCustomers)
 			r.Post("/customers", s.handleCreateCustomer)
+			r.Get("/customers/{id}/users", s.handleAdminListCustomerUsers)
 			r.Get("/naming-templates", s.handleListNamingTemplates)
 			r.Post("/naming-templates", s.handleSaveNamingTemplate)
 			r.Get("/audit-log", s.handleAuditLog)

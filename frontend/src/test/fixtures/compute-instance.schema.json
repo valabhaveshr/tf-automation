@@ -1,0 +1,654 @@
+{
+  "module_name": "compute/instance",
+  "version_tag": "modules/compute/instance/v1.0.0",
+  "metadata": {
+    "icon": "server",
+    "name": "instance",
+    "cloud": "gcp",
+    "category": "Compute",
+    "variables": [
+      {
+        "name": "project_id",
+        "group": "Basics",
+        "example": "acme-prod-app-01"
+      },
+      {
+        "name": "name",
+        "group": "Basics",
+        "example": "vm-app-prod-01"
+      },
+      {
+        "name": "zone",
+        "group": "Basics",
+        "example": "us-central1-a"
+      },
+      {
+        "name": "machine_type",
+        "group": "Basics",
+        "example": "e2-standard-2"
+      },
+      {
+        "name": "description",
+        "group": "Basics",
+        "example": "Application server for the billing API"
+      },
+      {
+        "name": "labels",
+        "group": "Basics",
+        "example": "{ environment = \"prod\", team = \"platform\" }"
+      },
+      {
+        "name": "subnetwork",
+        "group": "Networking",
+        "example": "projects/acme-prod-net-01/regions/us-central1/subnetworks/snet-app"
+      },
+      {
+        "name": "network_ip",
+        "group": "Networking",
+        "example": "10.10.0.5"
+      },
+      {
+        "name": "network_tags",
+        "group": "Networking",
+        "example": "[\"web\", \"allow-health-checks\"]"
+      },
+      {
+        "name": "enable_public_access",
+        "group": "Networking",
+        "example": "false"
+      },
+      {
+        "name": "hostname",
+        "group": "Networking",
+        "example": "app01.internal.example.com",
+        "advanced": true
+      },
+      {
+        "name": "enable_ip_forwarding",
+        "group": "Networking",
+        "example": "false",
+        "advanced": true
+      },
+      {
+        "name": "boot_disk_image",
+        "group": "Boot disk",
+        "example": "debian-cloud/debian-12"
+      },
+      {
+        "name": "boot_disk_type",
+        "group": "Boot disk",
+        "example": "pd-balanced"
+      },
+      {
+        "name": "boot_disk_size_gb",
+        "group": "Boot disk",
+        "example": "50"
+      },
+      {
+        "name": "boot_disk_kms_key_self_link",
+        "group": "Boot disk",
+        "example": "projects/acme-prod-kms-01/locations/us-central1/keyRings/kr-compute/cryptoKeys/key-disks",
+        "advanced": true
+      },
+      {
+        "name": "service_account_email",
+        "group": "Security",
+        "example": "sa-app-vm@acme-prod-app-01.iam.gserviceaccount.com"
+      },
+      {
+        "name": "deletion_protection",
+        "group": "Security",
+        "example": "true"
+      },
+      {
+        "name": "enable_secure_boot",
+        "group": "Security",
+        "example": "true",
+        "advanced": true
+      },
+      {
+        "name": "enable_vtpm",
+        "group": "Security",
+        "example": "true",
+        "advanced": true
+      },
+      {
+        "name": "enable_integrity_monitoring",
+        "group": "Security",
+        "example": "true",
+        "advanced": true
+      },
+      {
+        "name": "enable_confidential_compute",
+        "group": "Security",
+        "example": "false",
+        "advanced": true
+      },
+      {
+        "name": "provisioning_model",
+        "group": "Scheduling",
+        "example": "STANDARD"
+      },
+      {
+        "name": "spot_termination_action",
+        "group": "Scheduling",
+        "example": "STOP",
+        "advanced": true
+      },
+      {
+        "name": "startup_script",
+        "group": "Advanced",
+        "example": "#!/bin/bash\napt-get update && apt-get install -y nginx",
+        "advanced": true
+      },
+      {
+        "name": "metadata",
+        "group": "Advanced",
+        "example": "{ google-logging-enabled = \"true\" }",
+        "advanced": true
+      },
+      {
+        "name": "attached_disks",
+        "group": "Advanced",
+        "example": "[{ source = \"projects/acme-prod-app-01/zones/us-central1-a/disks/disk-data-01\", device_name = \"data\", mode = \"READ_WRITE\" }]",
+        "advanced": true
+      }
+    ],
+    "description": "A single hardened Compute Engine VM: private by default, OS Login, Shielded VM, dedicated service account and optional CMEK boot disk.",
+    "display_name": "Compute Instance",
+    "instance_label_field": "name"
+  },
+  "variables": [
+    {
+      "name": "project_id",
+      "type": "string",
+      "nullable": false,
+      "required": true,
+      "type_raw": "string",
+      "sensitive": false,
+      "description": "ID of the GCP project the VM is created in. 6-30 characters: lowercase letters, digits and hyphens, starting with a letter and not ending with a hyphen.",
+      "has_default": false,
+      "validations": [
+        {
+          "condition_raw": "can(regex(\"^[a-z][a-z0-9-]{4,28}[a-z0-9]$\", var.project_id))",
+          "error_message": "project_id must be 6-30 characters of lowercase letters, digits and hyphens, start with a letter and not end with a hyphen."
+        }
+      ]
+    },
+    {
+      "name": "name",
+      "type": "string",
+      "nullable": false,
+      "required": true,
+      "type_raw": "string",
+      "sensitive": false,
+      "description": "Name of the VM, unique within the project and zone. 1-63 characters: lowercase letters, digits and hyphens, starting with a letter and not ending with a hyphen (RFC 1035).",
+      "has_default": false,
+      "validations": [
+        {
+          "condition_raw": "can(regex(\"^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$\", var.name))",
+          "error_message": "name must be RFC 1035 compliant: 1-63 lowercase letters, digits or hyphens, starting with a letter and not ending with a hyphen."
+        }
+      ]
+    },
+    {
+      "name": "zone",
+      "type": "string",
+      "nullable": false,
+      "required": true,
+      "type_raw": "string",
+      "sensitive": false,
+      "description": "Zone the VM runs in, for example us-central1-a. It must be in the same region as the subnetwork.",
+      "has_default": false,
+      "validations": [
+        {
+          "condition_raw": "(\n      can(regex(\"^[a-z]+-[a-z]+[0-9]+-[a-z]$\", var.zone))\n      && startswith(var.zone, \"${try(regex(\"/regions/([a-z0-9-]+)/\", var.subnetwork)[0], \"\")}-\")\n    )",
+          "error_message": "zone must be a zone such as \"us-central1-a\" in the subnetwork's region."
+        }
+      ]
+    },
+    {
+      "name": "machine_type",
+      "type": "string",
+      "nullable": false,
+      "required": true,
+      "type_raw": "string",
+      "sensitive": false,
+      "description": "Machine type that sets the VM's vCPUs and memory, for example e2-standard-2, n2d-standard-4 or custom-4-8192 (custom-<vCPUs>-<memory MB>).",
+      "has_default": false,
+      "validations": [
+        {
+          "condition_raw": "can(regex(\"^([a-z][a-z0-9]*-[a-z0-9-]+|custom-[0-9]+-[0-9]+(-ext)?)$\", var.machine_type))",
+          "error_message": "machine_type must be a machine type such as \"e2-standard-2\" or \"custom-4-8192\"."
+        }
+      ]
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "default": null,
+      "nullable": true,
+      "required": false,
+      "type_raw": "string",
+      "sensitive": false,
+      "description": "Free-text description of the VM, shown in the Cloud Console. Leave empty for none.",
+      "has_default": true,
+      "validations": []
+    },
+    {
+      "name": "labels",
+      "type": "map",
+      "default": {},
+      "nullable": false,
+      "required": false,
+      "type_raw": "map(string)",
+      "sensitive": false,
+      "description": "Labels applied to the VM and its boot disk, as key = value pairs. Keys: lowercase letters, digits, _ and -, starting with a letter (max 63). Values: lowercase letters, digits, _ and - (max 63).",
+      "has_default": true,
+      "validations": [
+        {
+          "condition_raw": "alltrue([\n      for k, v in var.labels :\n      can(regex(\"^[a-z][a-z0-9_-]{0,62}$\", k)) && can(regex(\"^[a-z0-9_-]{0,63}$\", v))\n    ])",
+          "error_message": "Label keys must match ^[a-z][a-z0-9_-]{0,62}$ and values must match ^[a-z0-9_-]{0,63}$."
+        }
+      ],
+      "element_type": {
+        "name": "value",
+        "type": "string",
+        "nullable": false,
+        "required": false,
+        "type_raw": "string",
+        "sensitive": false,
+        "has_default": false,
+        "validations": []
+      }
+    },
+    {
+      "name": "subnetwork",
+      "type": "string",
+      "nullable": false,
+      "required": true,
+      "type_raw": "string",
+      "sensitive": false,
+      "description": "Subnet the VM's network interface is attached to, as an ID (projects/<project>/regions/<region>/subnetworks/<name>) or full self link. A Shared VPC subnet in a host project works too.",
+      "has_default": false,
+      "validations": [
+        {
+          "condition_raw": "can(regex(\"^(https://www\\\\.googleapis\\\\.com/compute/v1/)?projects/[a-z0-9-]+/regions/[a-z]+-[a-z]+[0-9]+/subnetworks/[a-z]([-a-z0-9]{0,61}[a-z0-9])?$\", var.subnetwork))",
+          "error_message": "subnetwork must be a subnet ID (projects/<p>/regions/<r>/subnetworks/<s>) or self link."
+        }
+      ]
+    },
+    {
+      "name": "network_ip",
+      "type": "string",
+      "default": null,
+      "nullable": true,
+      "required": false,
+      "type_raw": "string",
+      "sensitive": false,
+      "description": "Static internal IPv4 address for the VM, for example 10.10.0.5. It must be a free address inside the subnet's range. Leave empty for an ephemeral address.",
+      "has_default": true,
+      "validations": [
+        {
+          "condition_raw": "var.network_ip == null ? true : can(cidrnetmask(\"${var.network_ip}/32\"))",
+          "error_message": "network_ip must be a single IPv4 address such as \"10.10.0.5\"."
+        }
+      ]
+    },
+    {
+      "name": "network_tags",
+      "type": "list",
+      "default": [],
+      "nullable": false,
+      "required": false,
+      "type_raw": "list(string)",
+      "sensitive": false,
+      "description": "Network tags used by firewall rules and routes to target this VM, for example [\"web\", \"allow-health-checks\"]. Each tag: 1-63 lowercase letters, digits or hyphens, starting with a letter.",
+      "has_default": true,
+      "validations": [
+        {
+          "condition_raw": "alltrue([for t in var.network_tags : can(regex(\"^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$\", t))])",
+          "error_message": "network_tags must be RFC 1035 compliant: 1-63 lowercase letters, digits or hyphens, starting with a letter."
+        },
+        {
+          "condition_raw": "length(distinct(var.network_tags)) == length(var.network_tags)",
+          "error_message": "network_tags must not contain duplicates."
+        }
+      ],
+      "element_type": {
+        "name": "",
+        "type": "string",
+        "nullable": false,
+        "required": false,
+        "type_raw": "string",
+        "sensitive": false,
+        "has_default": false,
+        "validations": []
+      }
+    },
+    {
+      "name": "enable_public_access",
+      "type": "bool",
+      "default": false,
+      "nullable": false,
+      "required": false,
+      "type_raw": "bool",
+      "sensitive": false,
+      "description": "Attach an ephemeral external (public) IPv4 address to the VM. Off by default: VMs are private and should reach the internet through Cloud NAT.",
+      "has_default": true,
+      "validations": []
+    },
+    {
+      "name": "hostname",
+      "type": "string",
+      "default": null,
+      "nullable": true,
+      "required": false,
+      "type_raw": "string",
+      "sensitive": false,
+      "description": "Custom fully qualified hostname for the VM, for example app01.internal.example.com. Leave empty to use the GCP default (<name>.<zone>.c.<project>.internal).",
+      "has_default": true,
+      "validations": [
+        {
+          "condition_raw": "var.hostname == null ? true : can(regex(\"^([a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\\\\.)+[a-z]{2,63}$\", var.hostname))",
+          "error_message": "hostname must be a fully qualified DNS name such as \"app01.internal.example.com\"."
+        }
+      ]
+    },
+    {
+      "name": "enable_ip_forwarding",
+      "type": "bool",
+      "default": false,
+      "nullable": false,
+      "required": false,
+      "type_raw": "bool",
+      "sensitive": false,
+      "description": "Allow the VM to send and receive packets for IP addresses other than its own (needed for NAT gateways, routers and network appliances). Off by default.",
+      "has_default": true,
+      "validations": []
+    },
+    {
+      "name": "boot_disk_image",
+      "type": "string",
+      "nullable": false,
+      "required": true,
+      "type_raw": "string",
+      "sensitive": false,
+      "description": "Image the boot disk is created from: <project>/<family-or-image> such as debian-cloud/debian-12, projects/<p>/global/images/family/<family>, or a full image self link.",
+      "has_default": false,
+      "validations": [
+        {
+          "condition_raw": "can(regex(\"^[a-zA-Z0-9][a-zA-Z0-9:/._-]*/[a-zA-Z0-9._-]+$\", var.boot_disk_image))",
+          "error_message": "boot_disk_image must be an image reference such as \"debian-cloud/debian-12\", projects/<p>/global/images/family/<f> or an image self link."
+        }
+      ]
+    },
+    {
+      "name": "boot_disk_type",
+      "type": "string",
+      "default": "pd-balanced",
+      "nullable": false,
+      "required": false,
+      "type_raw": "string",
+      "sensitive": false,
+      "description": "Boot disk type. One of: pd-balanced (default), pd-standard, pd-ssd, pd-extreme, hyperdisk-balanced, hyperdisk-throughput, hyperdisk-extreme.",
+      "has_default": true,
+      "validations": [
+        {
+          "condition_raw": "contains([\"pd-standard\", \"pd-balanced\", \"pd-ssd\", \"pd-extreme\", \"hyperdisk-balanced\", \"hyperdisk-throughput\", \"hyperdisk-extreme\"], var.boot_disk_type)",
+          "error_message": "boot_disk_type must be one of pd-standard, pd-balanced, pd-ssd, pd-extreme, hyperdisk-balanced, hyperdisk-throughput or hyperdisk-extreme."
+        }
+      ]
+    },
+    {
+      "name": "boot_disk_size_gb",
+      "type": "number",
+      "default": null,
+      "nullable": true,
+      "required": false,
+      "type_raw": "number",
+      "sensitive": false,
+      "description": "Boot disk size in GB, a whole number of at least 10. Leave empty to use the image's own size.",
+      "has_default": true,
+      "validations": [
+        {
+          "condition_raw": "var.boot_disk_size_gb == null ? true : (var.boot_disk_size_gb >= 10 && floor(var.boot_disk_size_gb) == var.boot_disk_size_gb)",
+          "error_message": "boot_disk_size_gb must be a whole number of at least 10."
+        }
+      ]
+    },
+    {
+      "name": "boot_disk_kms_key_self_link",
+      "type": "string",
+      "default": null,
+      "nullable": true,
+      "required": false,
+      "type_raw": "string",
+      "sensitive": false,
+      "description": "Cloud KMS key that encrypts the boot disk (CMEK), as projects/<p>/locations/<l>/keyRings/<r>/cryptoKeys/<k>. Leave empty for Google-managed encryption. The Compute Engine service agent needs roles/cloudkms.cryptoKeyEncrypterDecrypter on the key.",
+      "has_default": true,
+      "validations": [
+        {
+          "condition_raw": "var.boot_disk_kms_key_self_link == null ? true : can(regex(\"^projects/[a-z0-9-]+/locations/[a-z0-9-]+/keyRings/[a-zA-Z0-9_-]{1,63}/cryptoKeys/[a-zA-Z0-9_-]{1,63}$\", var.boot_disk_kms_key_self_link))",
+          "error_message": "boot_disk_kms_key_self_link must be a crypto key ID: projects/<p>/locations/<l>/keyRings/<r>/cryptoKeys/<k>."
+        }
+      ]
+    },
+    {
+      "name": "service_account_email",
+      "type": "string",
+      "nullable": false,
+      "required": true,
+      "type_raw": "string",
+      "sensitive": false,
+      "description": "Email of the dedicated service account the VM runs as, <name>@<project>.iam.gserviceaccount.com. The Compute Engine default service account is rejected. The scope is always cloud-platform, so access is controlled by IAM roles only.",
+      "has_default": false,
+      "validations": [
+        {
+          "condition_raw": "can(regex(\"^[a-z][a-z0-9-]{4,28}[a-z0-9]@[a-z][a-z0-9-]{4,28}[a-z0-9]\\\\.iam\\\\.gserviceaccount\\\\.com$\", var.service_account_email))",
+          "error_message": "service_account_email must be a dedicated service account (<sa>@<project>.iam.gserviceaccount.com); the Compute Engine default service account is not allowed."
+        }
+      ]
+    },
+    {
+      "name": "deletion_protection",
+      "type": "bool",
+      "default": true,
+      "nullable": false,
+      "required": false,
+      "type_raw": "bool",
+      "sensitive": false,
+      "description": "Prevent the VM from being deleted (by Terraform or in the Console) until this is turned off. On by default.",
+      "has_default": true,
+      "validations": []
+    },
+    {
+      "name": "enable_secure_boot",
+      "type": "bool",
+      "default": true,
+      "nullable": false,
+      "required": false,
+      "type_raw": "bool",
+      "sensitive": false,
+      "description": "Shielded VM Secure Boot: only boot software signed by trusted keys. On by default; turn off only for images with unsigned drivers or kernels.",
+      "has_default": true,
+      "validations": []
+    },
+    {
+      "name": "enable_vtpm",
+      "type": "bool",
+      "default": true,
+      "nullable": false,
+      "required": false,
+      "type_raw": "bool",
+      "sensitive": false,
+      "description": "Shielded VM virtual Trusted Platform Module (vTPM), used for measured boot and integrity monitoring. On by default.",
+      "has_default": true,
+      "validations": []
+    },
+    {
+      "name": "enable_integrity_monitoring",
+      "type": "bool",
+      "default": true,
+      "nullable": false,
+      "required": false,
+      "type_raw": "bool",
+      "sensitive": false,
+      "description": "Shielded VM integrity monitoring: compare each boot against a known-good baseline and report deviations. On by default.",
+      "has_default": true,
+      "validations": []
+    },
+    {
+      "name": "enable_confidential_compute",
+      "type": "bool",
+      "default": false,
+      "nullable": false,
+      "required": false,
+      "type_raw": "bool",
+      "sensitive": false,
+      "description": "Run the VM as a Confidential VM with encrypted memory. Needs a supported machine family (for example n2d, c2d or c3) and disables live migration. Off by default.",
+      "has_default": true,
+      "validations": []
+    },
+    {
+      "name": "provisioning_model",
+      "type": "string",
+      "default": "STANDARD",
+      "nullable": false,
+      "required": false,
+      "type_raw": "string",
+      "sensitive": false,
+      "description": "STANDARD (default) for a regular VM, or SPOT for a much cheaper VM that Google can stop or delete at any time to reclaim capacity.",
+      "has_default": true,
+      "validations": [
+        {
+          "condition_raw": "contains([\"STANDARD\", \"SPOT\"], var.provisioning_model)",
+          "error_message": "provisioning_model must be STANDARD or SPOT."
+        }
+      ]
+    },
+    {
+      "name": "spot_termination_action",
+      "type": "string",
+      "default": "STOP",
+      "nullable": false,
+      "required": false,
+      "type_raw": "string",
+      "sensitive": false,
+      "description": "What happens to a SPOT VM when Google reclaims it: STOP (default, the VM and its disks are kept) or DELETE. Ignored for STANDARD VMs.",
+      "has_default": true,
+      "validations": [
+        {
+          "condition_raw": "contains([\"STOP\", \"DELETE\"], var.spot_termination_action)",
+          "error_message": "spot_termination_action must be STOP or DELETE."
+        }
+      ]
+    },
+    {
+      "name": "startup_script",
+      "type": "string",
+      "default": null,
+      "nullable": true,
+      "required": false,
+      "type_raw": "string",
+      "sensitive": false,
+      "description": "Script run as root on every boot (stored as the startup-script metadata value), for example a bash script starting with #!/bin/bash. Leave empty for none. Do not put secrets here; read them from Secret Manager instead.",
+      "has_default": true,
+      "validations": []
+    },
+    {
+      "name": "metadata",
+      "type": "map",
+      "default": {},
+      "nullable": false,
+      "required": false,
+      "type_raw": "map(string)",
+      "sensitive": false,
+      "description": "Extra instance metadata as key = value pairs. The keys enable-oslogin, block-project-ssh-keys, serial-port-enable, ssh-keys and sshKeys are reserved (the module enforces OS Login and blocks SSH keys and the serial console); use startup_script instead of a startup-script key.",
+      "has_default": true,
+      "validations": [
+        {
+          "condition_raw": "length(setintersection(keys(var.metadata), [\"enable-oslogin\", \"block-project-ssh-keys\", \"serial-port-enable\", \"ssh-keys\", \"sshKeys\"])) == 0",
+          "error_message": "metadata must not set enable-oslogin, block-project-ssh-keys, serial-port-enable, ssh-keys or sshKeys; the module enforces OS Login and blocks SSH keys and the serial port."
+        },
+        {
+          "condition_raw": "var.startup_script == null ? true : !contains(keys(var.metadata), \"startup-script\")",
+          "error_message": "Set the startup script either through startup_script or through a metadata startup-script key, not both."
+        }
+      ],
+      "element_type": {
+        "name": "value",
+        "type": "string",
+        "nullable": false,
+        "required": false,
+        "type_raw": "string",
+        "sensitive": false,
+        "has_default": false,
+        "validations": []
+      }
+    },
+    {
+      "name": "attached_disks",
+      "type": "list",
+      "default": [],
+      "nullable": false,
+      "required": false,
+      "type_raw": "list(object({\n    source      = string\n    device_name = string\n    mode        = optional(string)\n  }))",
+      "sensitive": false,
+      "description": "Existing persistent disks to attach to the VM, as a list of objects with source (disk ID or self link), device_name (RFC 1035) and optional mode (READ_WRITE by default, or READ_ONLY). Leave empty for none.",
+      "has_default": true,
+      "validations": [
+        {
+          "condition_raw": "length(distinct([for d in var.attached_disks : d.device_name])) == length(var.attached_disks)",
+          "error_message": "attached_disks device_name values must be unique."
+        },
+        {
+          "condition_raw": "alltrue([\n      for d in var.attached_disks :\n      can(regex(\"^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$\", d.device_name))\n      && (d.mode == null ? true : contains([\"READ_WRITE\", \"READ_ONLY\"], d.mode))\n      && can(regex(\"^(https://www\\\\.googleapis\\\\.com/compute/v1/)?projects/[a-z0-9-]+/(zones/[a-z]+-[a-z]+[0-9]+-[a-z]|regions/[a-z]+-[a-z]+[0-9]+)/disks/[a-z]([-a-z0-9]{0,61}[a-z0-9])?$\", d.source))\n    ])",
+          "error_message": "attached_disks need a disk ID or self link as source, an RFC 1035 device_name and mode READ_WRITE or READ_ONLY (or null)."
+        }
+      ],
+      "element_type": {
+        "name": "",
+        "type": "object",
+        "nullable": false,
+        "required": false,
+        "type_raw": "object({device_name=string, mode=string, source=string})",
+        "sensitive": false,
+        "has_default": false,
+        "validations": [],
+        "object_fields": {
+          "mode": {
+            "name": "mode",
+            "type": "string",
+            "nullable": false,
+            "required": false,
+            "type_raw": "string",
+            "sensitive": false,
+            "has_default": false,
+            "validations": []
+          },
+          "source": {
+            "name": "source",
+            "type": "string",
+            "nullable": false,
+            "required": false,
+            "type_raw": "string",
+            "sensitive": false,
+            "has_default": false,
+            "validations": []
+          },
+          "device_name": {
+            "name": "device_name",
+            "type": "string",
+            "nullable": false,
+            "required": false,
+            "type_raw": "string",
+            "sensitive": false,
+            "has_default": false,
+            "validations": []
+          }
+        }
+      }
+    }
+  ]
+}

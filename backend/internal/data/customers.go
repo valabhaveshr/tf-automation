@@ -9,19 +9,21 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const customerColumns = `id, name, business_short_code, created_at, updated_at`
+const customerColumns = `id, name, business_short_code, created_at, updated_at,
+	contact_name, contact_email, contact_phone, country, industry,
+	default_cloud, default_region, gcp_organization_id, billing_account_id`
 
 func scanCustomer(row rowScanner, c *Customer) error {
-	return row.Scan(&c.ID, &c.Name, &c.BusinessShortCode, &c.CreatedAt, &c.UpdatedAt)
+	return row.Scan(&c.ID, &c.Name, &c.BusinessShortCode, &c.CreatedAt, &c.UpdatedAt,
+		&c.ContactName, &c.ContactEmail, &c.ContactPhone, &c.Country, &c.Industry,
+		&c.DefaultCloud, &c.DefaultRegion, &c.GCPOrganizationID, &c.BillingAccountID)
 }
 
 // CreateCustomer registers a new customer with its business_short_code. A
 // duplicate name is returned as a *ConflictError (maps to the OpenAPI
 // POST /admin/customers 409).
 func (s *Store) CreateCustomer(ctx context.Context, c *Customer) (*Customer, error) {
-	q := `INSERT INTO customers (name, business_short_code) VALUES ($1, $2)
-		RETURNING ` + customerColumns
-	row := s.pool.QueryRow(ctx, q, c.Name, c.BusinessShortCode)
+	row := s.pool.QueryRow(ctx, insertCustomerSQL, customerInsertArgs(c)...)
 	out := &Customer{}
 	if err := scanCustomer(row, out); err != nil {
 		return nil, fmt.Errorf("data: create customer: %w", wrapConflict(err))
@@ -82,12 +84,31 @@ func (s *Store) ListCustomers(ctx context.Context) ([]*Customer, error) {
 	return out, nil
 }
 
-// UpdateCustomer updates a customer's business_short_code (admin-editable
-// per the locked decision).
+// insertCustomerSQL/customerInsertArgs are shared by CreateCustomer and
+// CompleteOnboarding (which inserts inside its own transaction).
+const insertCustomerSQL = `INSERT INTO customers (name, business_short_code,
+		contact_name, contact_email, contact_phone, country, industry,
+		default_cloud, default_region, gcp_organization_id, billing_account_id)
+	VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE(NULLIF($8, ''), 'gcp'), $9, $10, $11)
+	RETURNING ` + customerColumns
+
+func customerInsertArgs(c *Customer) []any {
+	return []any{c.Name, c.BusinessShortCode,
+		c.ContactName, c.ContactEmail, c.ContactPhone, c.Country, c.Industry,
+		c.DefaultCloud, c.DefaultRegion, c.GCPOrganizationID, c.BillingAccountID}
+}
+
+// UpdateCustomer updates a customer's name, business_short_code (admin-
+// editable per the locked decision) and profile fields. Callers decide who
+// may change which field; this writes them all.
 func (s *Store) UpdateCustomer(ctx context.Context, c *Customer) (*Customer, error) {
-	q := `UPDATE customers SET business_short_code = $1, updated_at = now() WHERE id = $2
+	q := `UPDATE customers SET name = $1, business_short_code = $2,
+		contact_name = $3, contact_email = $4, contact_phone = $5, country = $6, industry = $7,
+		default_cloud = COALESCE(NULLIF($8, ''), 'gcp'), default_region = $9,
+		gcp_organization_id = $10, billing_account_id = $11, updated_at = now()
+		WHERE id = $12
 		RETURNING ` + customerColumns
-	row := s.pool.QueryRow(ctx, q, c.BusinessShortCode, c.ID)
+	row := s.pool.QueryRow(ctx, q, append(customerInsertArgs(c), c.ID)...)
 	out := &Customer{}
 	if err := scanCustomer(row, out); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

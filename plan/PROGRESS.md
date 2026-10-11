@@ -30,3 +30,22 @@ Tracks completion of each phase (and, within Phase 1, each workstream). Updated 
 Added `backend/cmd/seed-admin` (not part of any workstream's original scope): Phase 1 deliberately has no signup endpoint, so there was no way to create the first login. This CLI hashes a password via `auth.HashPassword` and creates/promotes a user with the `admin` role. See `docs/RUNNING_LOCALLY.md` for the full local build/run/test runbook.
 
 All 9 Phase 1 workstreams are code-complete. `backend/go.mod` has five `require` blocks (WS-C/E, WS-F, WS-A, WS-D, WS-G) — verified no duplicate module entries. `go.sum` does not exist yet; `go mod tidy` is required before anything will build.
+
+## Customer tenancy, portal UI redesign, Docker (2026-10-11)
+
+| Item | Status | Summary |
+|---|---|---|
+| Nested modules + tag prefix | Done, tested | Module name = folder path under `modules/` (any depth); tags `compute/instance/vX.Y.Z` or `modules/compute/instance/vX.Y.Z`. Schema route accepts slashes; codegen maps the path to an HCL identifier and tfvars file name, and fixed `source` URLs (real repo name + modules path). |
+| Customer tenancy (backend) | Done, tested | Migration 000003, `internal/api/tenancy.go` + `customer_portal.go`, `internal/data/invitations.go`. Invite-only onboarding; unique case-insensitive short name; per-customer record scoping (cross-tenant -> 404); team and invitations; `COOKIE_SECURE` toggle; `/api/healthz`. DB tests (`tenancy_test.go`) pass against real Postgres 16, as do the previously never-run roles/audit tests. API smoke-tested end to end against a local server. |
+| `metadata.yaml` `variables:` hints | Done, tested | Ordered per-variable `example` / `group` / `advanced`, parsed into module metadata and served to the UI. |
+| Frontend redesign (Mantine) | Done; tsc/lint/build/tests pass; **not yet clicked through in a browser** | Records renamed Resources in the UI. Left-sidebar shell; resources home; onboarding; invite accept; editor with module dropdown, per-module panes, instance tabs, grouped fields with i/e hovers, preview drawer + diff; Team, Organization, Customers, Catalog, Audit log. Render tests use the real module schemas. |
+| Portal-ready modules (`C:\repos\tf-modules`) | Done, tested | `compute/instance` (27 vars) and `iam/project-iam` (7 vars): flattened, with full `metadata.yaml` hints. `terraform fmt`/`validate`/`test` pass. Portal-generated code using both modules passes `terraform validate`. Remaining 56 modules from `C:\repos\terraform\modules` not converted yet (on request). |
+| Docker | Written; build steps verified individually, images not built (no Docker daemon here) | `backend/Dockerfile`, `frontend/Dockerfile` + `nginx.conf.template`, `docker-compose.yml`, `.env.example`. |
+| `go.sum` / `package-lock.json` | Committed | `go mod tidy` raised `go` to 1.25 (dependency requirement); CI now reads the Go version from `go.mod`. |
+
+**Next:**
+- Click through § 7 of `docs/RUNNING_LOCALLY.md` against real GitHub repos.
+- Build the Docker images on the Linux host.
+- Then convert more modules into `C:\repos\tf-modules`.
+
+Known gap: SSO users aren't linked to customers yet (they see "No organization yet").

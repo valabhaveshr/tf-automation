@@ -9,14 +9,16 @@ Full plan, phase-by-phase detail, data model, diagrams, and workstream breakdown
 | Area | Decision |
 |---|---|
 | Backend language | Go, using `github.com/hashicorp/hcl/v2` (`hclparse` + `hclwrite`) for all HCL parsing/generation — guarantees syntactic validity and closes string-escaping injection risk |
-| Frontend | React + TypeScript, schema-driven forms |
+| Frontend | React + TypeScript + **Mantine 7** (left-sidebar AppShell), schema-driven forms. UI calls records "resources" (API keeps `/records`) |
 | Database | PostgreSQL |
 | VCS | GitHub, for both the modules (input) repo and the generated-code (output) repo |
 | GitHub credentials | GitHub App (free to register; higher rate limits and finer-grained permissions than a PAT) |
 | Record model | One record = one `customer/project/env` combination = one future Terraform state, containing all its selected module instances |
 | Multi-instance codegen | Single module block per module type, `for_each` over a map/list variable — not repeated blocks |
 | tfvars structure | **Per-service**: one `<module_name>.auto.tfvars` file per selected module within a record — Terraform auto-loads these, no `-var-file` chaining needed |
-| Module discovery | Hybrid: variable schema auto-extracted from `variables.tf`; UI metadata from a required `metadata.yaml` per module |
+| Module discovery | Hybrid: variable schema auto-extracted from `variables.tf`; UI metadata from a required `metadata.yaml` per module, including a `variables:` section (per-variable `example`, `group`, `advanced`) that drives form sections and the "e" hover; the "i" hover is the variable's `description` |
+| Modules repo | Portal-ready modules live in `C:\repos\tf-modules` (flattened: one resource per module call, scalar variables). **Never modify `C:\repos\terraform\modules`** (the separate registry consumed by `C:\repos\projects`) |
+| Tenancy | **Multi-tenant, invite-only.** Platform admin = `admin` role with no customer (sees all). Customer users belong to exactly one customer (`users.customer_id`) and only see its resources; `customer_admin` manages its profile and team. Platform admin invites a customer's first admin, who completes **onboarding** (org name, unique case-insensitive short name, contact, cloud defaults) on first sign-in. Invite links carry a one-time token (only its SHA-256 is stored), valid 7 days. No self-signup |
 | Module versioning | **By git tag**, `<module-name>/vX.Y.Z` (monorepo, path-scoped). `<module-name>` is the folder path under `modules/`, nesting allowed (`compute/instance/v1.0.0`); the `modules/` prefix is optional in the tag (`modules/compute/instance/v1.0.0` is the same module). Untagged modules are excluded from the catalog. Each instance pins the exact tag used at submission time |
 | Catalog refresh | Webhook (push + tag-create) + periodic reconciliation fallback + **admin-only manual refresh** (gated by `users.is_admin` in Phase 1, superseded by Phase 3 roles) |
 | Naming convention | Org-wide, opt-in per module via `metadata.yaml`'s `naming_resource_type`. Admin-managed DB-backed templates (tokens: `business_short_code`, `env`, `project`, `user_label`, `num_id`). Computed name is an **editable default**, not locked. `business_short_code` lives in a `customers` registry (once per customer). `num_id` auto-increments per `(business_short_code, env, resource_type)`, atomically allocated at save time, rejects past its configured width |
@@ -26,7 +28,8 @@ Full plan, phase-by-phase detail, data model, diagrams, and workstream breakdown
 | Sensitive variables | Included in generated tfvars for Phase 1, with a clear UI warning at preview time. Exclusion/secrets-manager handling deferred to Phase 2 |
 | State backend | Self-hosted GCS/S3 (not Terraform Cloud), selected via a `STATE_BACKEND` config toggle |
 | Record deletion | Soft-delete in DB only — output repo files are **never** auto-removed |
-| Auth (Phase 1) | Simple built-in username/password + lightweight `is_admin` flag; full SSO/RBAC in Phase 3 |
+| Auth (Phase 1) | Simple built-in username/password + lightweight `is_admin` flag; full SSO/RBAC in Phase 3. Session cookie is `Secure` unless `COOKIE_SECURE=false` (plain-HTTP test deployments only) |
+| Deployment | `backend/Dockerfile` (server + seed-admin + migrate), `frontend/Dockerfile` (nginx serving the build, proxying `/api`), root `docker-compose.yml`. Go 1.25+ (`go.mod`), `go.sum` and `package-lock.json` committed |
 | Execution scope (Phase 1) | Generate + store only. No `terraform plan`/`apply` runs in this phase — that's Phase 2 |
 | Planning docs location | This file stays at project root (Claude Code auto-loads it from here only); detailed plans live in `plan/` |
 

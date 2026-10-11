@@ -49,7 +49,12 @@ func (s *Server) handleSyncStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, badRequest("invalid record id"))
 		return
 	}
-	rec, err := s.Store.GetRecord(r.Context(), id)
+	t, err := s.loadTenant(r.Context(), r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	rec, err := s.loadAccessibleRecord(r.Context(), t, id)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -73,7 +78,12 @@ func (s *Server) handleRetrySync(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	rec, err := s.Store.GetRecord(ctx, id)
+	t, err := s.loadTenant(ctx, r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	rec, err := s.loadAccessibleRecord(ctx, t, id)
 	if err != nil {
 		writeErr(w, err)
 		return

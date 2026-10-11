@@ -1,0 +1,8 @@
+.screen {
+  @mixin light {
+    background: linear-gradient(160deg, var(--mantine-color-brand-0), var(--mantine-color-gray-0) 55%);
+  }
+  @mixin dark {
+    background: var(--mantine-color-dark-8);
+  }
+}

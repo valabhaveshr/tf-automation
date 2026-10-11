@@ -1,133 +1,142 @@
-import { FormEvent, useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { Alert, Badge, Button, Card, Code, Group, Select, Table, Text, TextInput, Tooltip } from '@mantine/core';
+import { IconHistory, IconSearch } from '@tabler/icons-react';
 import * as api from '../api/client';
-import { isAdmin, type AuditLogEntry, type AuditLogResourceType } from '../api/types';
-import { useAuth } from '../state/auth';
+import type { AuditLogEntry, AuditLogResourceType } from '../api/types';
+import { errorMessage, formatDateTime, relativeTime } from '../lib/format';
+import { EmptyState, PageHeader } from '../components/common';
 
-const RESOURCE_TYPES: AuditLogResourceType[] = ['record', 'catalog', 'naming_template', 'customer'];
+const RESOURCE_TYPES: { value: AuditLogResourceType; label: string }[] = [
+  { value: 'record', label: 'Resources' },
+  { value: 'customer', label: 'Customers' },
+  { value: 'invitation', label: 'Invitations' },
+  { value: 'catalog', label: 'Catalog' },
+  { value: 'naming_template', label: 'Naming templates' },
+];
 const PAGE_SIZE = 50;
 
-/**
- * Admin-only audit log viewer (GET /admin/audit-log). Role-gated the same
- * way as CatalogBrowser's refresh button (isAdmin(user)); App.tsx also keeps
- * this route out of non-admins' reach entirely (RequireAdmin), but this
- * component re-checks so it renders nothing useful even if ever mounted
- * directly (e.g. during future refactors of the route guard).
- */
+function actionColor(action: string) {
+  if (action.endsWith('.delete') || action.endsWith('.revoke')) return 'red';
+  if (action.endsWith('.create') || action.endsWith('.onboard')) return 'teal';
+  if (action.endsWith('.update')) return 'blue';
+  return 'gray';
+}
+
+/** Platform admin: who changed what, newest first (GET /admin/audit-log). */
 export default function AuditLogPage() {
-  const { user } = useAuth();
   const [entries, setEntries] = useState<AuditLogEntry[]>([]);
-  const [resourceType, setResourceType] = useState<AuditLogResourceType | ''>('');
+  const [resourceType, setResourceType] = useState<AuditLogResourceType | null>(null);
   const [actor, setActor] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
 
   const load = useCallback(
-    async (opts: { reset: boolean }) => {
+    async (reset: boolean, before?: string) => {
       setLoading(true);
       setError(null);
       try {
-        const before = opts.reset ? undefined : entries[entries.length - 1]?.created_at;
         const data = await api.getAuditLog({
-          resource_type: resourceType || undefined,
+          resource_type: resourceType ?? undefined,
           actor: actor.trim() || undefined,
           limit: PAGE_SIZE,
-          before,
+          before: reset ? undefined : before,
         });
-        setEntries((prev) => (opts.reset ? data : [...prev, ...data]));
+        setEntries((prev) => (reset ? data : [...prev, ...data]));
         setHasMore(data.length === PAGE_SIZE);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load audit log.');
+        setError(errorMessage(err, 'Could not load the audit log.'));
       } finally {
         setLoading(false);
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [resourceType, actor],
   );
 
   useEffect(() => {
-    if (!isAdmin(user)) return;
-    load({ reset: true });
-    // Filters changed -> reset. Deliberately not depending on `entries`/`load`.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, resourceType, actor]);
-
-  if (!isAdmin(user)) {
-    // Defense in depth: App.tsx's route guard should already keep non-admins
-    // from reaching this page.
-    return <p className="field-error">You do not have access to this page.</p>;
-  }
-
-  function handleFilterSubmit(e: FormEvent) {
-    e.preventDefault();
-    load({ reset: true });
-  }
+    const t = setTimeout(() => load(true), 250);
+    return () => clearTimeout(t);
+  }, [load]);
 
   return (
-    <div className="audit-log-page">
-      <h2>Audit log</h2>
-
-      <form onSubmit={handleFilterSubmit} style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-        <div className="field-row">
-          <label>Resource type</label>
-          <select value={resourceType} onChange={(e) => setResourceType(e.target.value as AuditLogResourceType | '')}>
-            <option value="">All</option>
-            {RESOURCE_TYPES.map((rt) => (
-              <option key={rt} value={rt}>
-                {rt}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="field-row">
-          <label>Actor</label>
-          <input
-            placeholder="username"
+    <>
+      <PageHeader title="Audit log" description="Every state-changing action across all customers, newest first." />
+      <Card p={0}>
+        <Group p="md" gap="sm">
+          <TextInput
+            placeholder="Filter by user"
+            leftSection={<IconSearch size={16} />}
             value={actor}
-            onChange={(e) => setActor(e.target.value)}
+            onChange={(e) => setActor(e.currentTarget.value)}
+            style={{ flex: 1 }}
           />
-        </div>
-        <button type="submit" disabled={loading}>
-          {loading ? 'Loading...' : 'Filter'}
-        </button>
-      </form>
-
-      {error && <p className="field-error">{error}</p>}
-
-      {entries.length === 0 && !loading && <p>No audit log entries match your filters.</p>}
-
-      {entries.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>When</th>
-              <th>Actor</th>
-              <th>Action</th>
-              <th>Resource</th>
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map((entry) => (
-              <tr key={entry.id}>
-                <td>{new Date(entry.created_at).toLocaleString()}</td>
-                <td>{entry.actor_username}</td>
-                <td>{entry.action}</td>
-                <td>
-                  {entry.resource_type}
-                  {entry.resource_id ? ` (${entry.resource_id})` : ''}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      {hasMore && entries.length > 0 && (
-        <button type="button" onClick={() => load({ reset: false })} disabled={loading}>
-          {loading ? 'Loading...' : 'Load more'}
-        </button>
-      )}
-    </div>
+          <Select placeholder="All resource types" data={RESOURCE_TYPES} value={resourceType} onChange={(v) => setResourceType(v as AuditLogResourceType | null)} clearable w={220} />
+        </Group>
+        {error && (
+          <Alert color="red" mx="md" mb="md">
+            {error}
+          </Alert>
+        )}
+        {entries.length === 0 && !loading ? (
+          <EmptyState icon={<IconHistory size={40} stroke={1.3} />} title="No entries" />
+        ) : (
+          <Table.ScrollContainer minWidth={760}>
+            <Table verticalSpacing="sm" highlightOnHover>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>When</Table.Th>
+                  <Table.Th>User</Table.Th>
+                  <Table.Th>Action</Table.Th>
+                  <Table.Th>Details</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {entries.map((e) => (
+                  <Table.Tr key={e.id}>
+                    <Table.Td>
+                      <Tooltip label={formatDateTime(e.created_at)} withArrow>
+                        <Text size="sm">{relativeTime(e.created_at)}</Text>
+                      </Tooltip>
+                    </Table.Td>
+                    <Table.Td>
+                      <Text size="sm" fw={500}>
+                        {e.actor_username || '—'}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Badge variant="light" color={actionColor(e.action)} tt="none">
+                        {e.action}
+                      </Badge>
+                    </Table.Td>
+                    <Table.Td>
+                      {e.detail && Object.keys(e.detail).length > 0 ? (
+                        <Group gap={6}>
+                          {Object.entries(e.detail).map(([k, v]) => (
+                            <Code key={k}>
+                              {k}={typeof v === 'string' ? v : JSON.stringify(v)}
+                            </Code>
+                          ))}
+                        </Group>
+                      ) : (
+                        <Text size="xs" c="dimmed" ff="monospace">
+                          {e.resource_id ?? ''}
+                        </Text>
+                      )}
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </Table.ScrollContainer>
+        )}
+        {hasMore && entries.length > 0 && (
+          <Group justify="center" p="md">
+            <Button variant="default" loading={loading} onClick={() => load(false, entries[entries.length - 1]?.created_at)}>
+              Load more
+            </Button>
+          </Group>
+        )}
+      </Card>
+    </>
   );
 }
